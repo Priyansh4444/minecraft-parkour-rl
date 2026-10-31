@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 agent-log.jsonl
 q-table.json
+linear-q.json

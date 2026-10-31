@@ -1,12 +1,12 @@
 # Installation and first run
 
-The official-launcher and single-player workflow has **not yet been tested end to end on any operating system**, including macOS and Windows. The earlier Linux smoke test used a separate server. These instructions are the proposed setup for the current prototype; report setup errors before relying on it for experiments.
+The official-launcher and single-player workflow has **not yet been tested end to end on any operating system**, including macOS and Windows. These instructions set up a local test world. Report setup errors before relying on it for experiments.
 
 ## Requirements
 
 - [Minecraft: Java Edition and the official Minecraft Launcher](https://www.minecraft.net/download), with a licensed account.
 - [Python 3.12](https://www.python.org/downloads/) and [Git](https://git-scm.com/downloads) (or download the project files as a ZIP).
-- Minecraft **26.1**, Fabric Loader **0.19.3**, Minescript **5.0 for Fabric 26.1**, and Fabric API **0.155.3+26.1.2**. These are the versions from the earlier Linux prototype; this particular official-launcher combination still needs verification on each platform.
+- Minecraft **26.1**, Fabric Loader **0.19.3**, Minescript **5.0 for Fabric 26.1**, and Fabric API **0.155.3+26.1.2**. Use these versions together; the official-launcher setup still needs an end-to-end test on each platform.
 
 Fabric and Minescript are mods for Minecraft Java Edition. Neither a separately running server nor Node.js is required for this workflow. On macOS, the [Fabric installer may require Java](https://docs.fabricmc.net/players/installing-fabric/macos) to run.
 
@@ -27,9 +27,9 @@ Fabric and Minescript are mods for Minecraft Java Edition. Neither a separately 
 ## Build and run
 
 1. Start the Fabric installation. Create a **new Superflat single-player world with cheats enabled**. Use a dedicated world: the builder overwrites blocks at fixed coordinates near `(0, -60, 0)`.
-2. Open Minecraft chat and enter `\build_course`. Wait for the completion message, then inspect the start platform, two-block gap and gold goal. The message means commands were sent, not that every block was verified. Run the builder once in each new world.
-3. In chat enter `\agent 3 1.0 1.0`. This runs three episodes with fully random exploration. Progress and final outcomes appear in chat. Try `\agent 20 0.5 0.05` for 20 training episodes with decreasing exploration. Run only one batch at a time.
-4. The game directory's `minescript/agent-log.jsonl` and `minescript/q-table.json` are local generated outputs. Later training runs reuse the table; move or delete it deliberately for a fresh run. They are not synchronized with the repository automatically.
+2. Open Minecraft chat and enter `\build_course`. Wait for the completion message, then inspect the start platform, three gaps and gold goal. The message means commands were sent, not that every block was verified. Run the builder once in each new world.
+3. In chat enter `\agent 3 1.0 1.0`. This runs three episodes with fully random exploration. Progress and final outcomes appear in chat. Try `\agent 20 0.5 0.05` for 20 training episodes with decreasing exploration. Run only one batch at a time. For a seeded random baseline, use `\agent 20 --random --seed 7`; after training, evaluate without updates using `\agent 20 --eval --seed 8`.
+4. The game directory's `minescript/agent-log.jsonl` and `minescript/linear-q.json` are local generated outputs. Later training runs reuse the weights; move or delete it deliberately for a fresh run. They are not synchronized with the repository automatically.
 
 A few completed episodes are a smoke test, not evidence that the agent learned or generalizes.
 

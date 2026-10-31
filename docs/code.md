@@ -1,43 +1,53 @@
-# Understanding the code
+# How the agent works
 
-The project is an early, straight-line, one-gap parkour prototype. The official-launcher single-player workflow has not been tested end to end. Timing, resets, observations, and learning results require more testing before any claims of performance or generalization.
+The course has three straight jumps, with the middle landing one block higher. The objective is to reach the gold goal without falling. This is an initial experiment; it does **not** solve arbitrary Minecraft parkour, and the current learner has not been shown to learn or generalize.
 
-## Files and flow
+## Files and loop
 
-- `parkour/build_course.py` sends Minecraft commands to build the start, gap, catch floor, and goal in a new Superflat world. It uses fixed coordinates.
-- `parkour/course.json` defines the start, facing direction, goal, fall threshold, and goal radius for the agent. Keep it consistent with the builder's coordinates.
-- `parkour/agent.py` observes, acts, computes rewards, updates the Q table, and repeats episodes. It runs as a Minescript command inside the game.
+- `parkour/build_course.py` sends commands to make the platforms, gaps, catch floor and goal. It overwrites blocks around the origin in the test world.
+- `parkour/course.json` supplies the start, facing direction, goal and fall threshold. Keep it consistent with the builder.
+- `parkour/agent.py` reads state through Minescript, chooses and performs an action, computes reward, updates weights and repeats. An episode ends at the goal, a fall, or an 80-decision limit.
 
-An episode resets the player, chooses and performs actions, and ends on a fall, goal, or time limit. A run is a batch of episodes. The external Minecraft Launcher starts the game; Fabric loads Minescript, which exposes game state and controls to the Python scripts.
+## What the player can observe
 
-## State and observation
+Minecraft supplies numerical position `(x,y,z)`, velocity `(vx,vy,vz)`, and yaw. The agent also estimates whether it is grounded, reads a short line of blocks ahead in a single batch, and knows the configured goal. Its inputs include:
 
-`observe` reads position and vertical velocity through Minescript, estimates horizontal speed from position changes, and calls `scan` to sample blocks ahead. It groups values into six small categories, or **bins**, and joins them into a string for the Q-table key:
-
-| Field | Meaning | Why it matters |
+| Input | Why it matters | Current limitation |
 | --- | --- | --- |
-| `lip` | Distance category to the near edge of the next gap | Timing takeoff |
-| `gap` | Estimated number of empty columns ahead | Clearing the gap |
-| `height` | Landing surface estimated lower, similar, or higher than the player | Height changes |
-| `speed` | Horizontal speed category | Momentum at takeoff and landing |
-| `vy` | Vertical velocity category | Rising or falling |
-| `ground` | Estimated whether the player is on a block | Whether a jump can start |
+| Distance to the next edge and approximate gap width | Helps decide when and how to jump | Only a narrow line straight ahead is scanned. |
+| Estimated landing height | An uphill landing changes a jump | Measured relative to the player's feet, so it changes in midair; unknown has its own category. |
+| Forward speed, vertical velocity, lateral velocity | Momentum and whether the player rises or falls affect a landing | Speed is estimated from displacement; the controller cannot correct sideways movement yet. |
+| Grounded estimate, lateral offset and yaw error | Jumps require contact and alignment | Grounded is inferred from nearby blocks and position, not guaranteed. Facing direction is fixed. |
+| Distance to goal | Encodes the objective | Straight-line distance alone ignores obstacles and is not a route plan. |
 
-For example, `4,2,1,0,1,1` describes six categories, not six coordinates. `scan` samples a narrow line in the configured direction and ignores the safety floor. It does not understand arbitrary block shapes, corners, sideways motion or full 3D geometry. Unknown landing height shares the similar-height bin. Ground contact is estimated using blocks, position and velocity. Two different situations can fall into one bin yet need different actions, so this representation is **not guaranteed Markov** and has not demonstrated generalization.
+Other available or derivable information includes health, hunger, nearby block types, the current world tick and heading. This experiment leaves health and hunger out of the learning state to keep the first experiment smaller. Hunger and damage can still change in the game; control them in the world settings, or include their effects and timing in the observations if the team studies them. No single vector captures every relevant piece of Minecraft state.
 
-## Actions and learning
+Position, velocity and yaw are continuous measurements, but the learner groups them into coarse **features** such as slow/fast or near/far. It also combines edge distance, speed and grounded status so that it can learn a takeoff timing. Unlike one entry for every full state, separate feature weights are shared across observations; learning can transfer between observations that share features. This is a lightweight **linear Q-function approximation**, not a neural network or proof of generalization. Binning loses information; the state may not be Markov, and coarse features may alias situations needing different actions. Linear off-policy bootstrapping can also be unstable.
 
-`choose` selects one of five actions: `idle`, `walk`, `run`, `walk_jump`, or `run_jump`. Each presses a combination of forward, sprint, and jump buttons. With probability epsilon it chooses a random action; otherwise it chooses a highest-valued action, breaking ties randomly. Unseen states also produce a random action.
+The five actions are idle, walk, run, walk+jump and run+jump. There are no turns or left/right actions, so arbitrary 3D navigation, neos, and mazes are out of scope. The code sums weights for active features to estimate the value of each action, then picks a random action with probability epsilon or a highest-value action otherwise. It updates active weights toward a one-step Q-learning target. The weights are saved in `linear-q.json`.
 
-A Q-table maps each state to five estimated action values. After an action, the agent updates the selected value:
+## Reward for reaching the goal
+
+The base reward is `-0.01` per decision, `+10` for reaching the goal, and `-10` for a fall. Goal means the player is near the configured point and estimated grounded; it is not strictly a gold-block collision. The code adds distance-based shaping:
 
 ```text
-target = reward + discount × best value in the next state
-Q[state, action] += learning_rate × (target - Q[state, action])
+potential(s) = -0.1 × min(distance_to_goal(s), 40)
+shaping = 0.95 × potential(next_state) - potential(state)
+reward = base_reward + shaping
 ```
 
-For a goal or fall, the target is just the reward: there is no future value after a terminal event. At the external step limit, the last update still bootstraps from the next observation. The current parameters are learning rate `ALPHA = 0.25`, discount `GAMMA = 0.95`, and at most 80 decisions per episode. Actual button timing needs checking: the game and script run asynchronously.
+For a true goal or fall, the next potential is zero and the Q target does not bootstrap. An external time limit still bootstraps from its final observation. The potential is a heuristic: straight-line distance can point through obstacles, and it does not guarantee safe jumps or learning. The policy-preservation result for potential-based shaping assumes a suitable MDP and matching discount; approximated and partially observed state can violate those assumptions. Each step logs both shaped `reward` and `base_reward`, plus raw velocity, position and goal distance.
 
-Ordinary reward is `2 × forward progress - 0.01`; reaching the goal replaces it with `+10` and falling with `-10`. A one-time `+3` may be added when the code estimates a gap was crossed. That crossing flag is not included in the Q-table state, and scan-based detection is approximate. The goal is a position near the target with estimated ground contact; it does not require touching the gold block itself. These details matter when evaluating what the agent actually learned.
+## Speed and evaluation
 
-`reset` releases controls, checks that the player is alive, teleports to the configured start, and waits for position and horizontal speed to settle. The catch floor is intended to help with falls, but resets are not yet proven reliable. The table and logs are local to the game directory. Training reuses the table; deliberately move or delete it to start fresh. There is no separate evaluation mode, fixed seed, or controlled evaluation harness yet.
+The code batches block reads and avoids re-sending button releases that are already off. It does **not** claim a measured speedup or exact two-tick action duration: Python-to-game calls and the game tick rate can dominate. Each episode's log records `steps` and `seconds`; measure steps per second on the actual machine and inspect timeouts. Increasing simulator speed or using asynchronous executors requires separate correctness testing.
+
+Training saves `linear-q.json` in the game's `minescript` folder. A later run resumes it; move or delete the file to start a fresh run. Use `\agent 20 --eval --seed 8` to evaluate saved weights without updating them; `\agent 20 --random --seed 7` evaluates random actions without training. A seed controls Python's random choices, not all Minecraft timing or physics. Evaluation still needs multiple independent trained seeds, a scripted baseline, and held-out course layouts and start positions that were not used for tuning. Report success rate, falls, completion steps, and wall time. A successful single course is not general parkour.
+
+## Sources
+
+- The course's Lecture 09 covers function approximation, tile coding and instability with off-policy bootstrapping; Lecture 10 discusses evaluation.
+- [Minescript documentation](https://minescript.net/docs) describes player data, batched block reads and control APIs.
+- [Ng, Harada and Russell: Policy Invariance under Reward Transformations](https://people.eecs.berkeley.edu/~russell/papers/icml99-shaping.pdf) describes potential-based shaping.
+- [Gymnasium: Handling Time Limits](https://gymnasium.farama.org/v1.1.1/tutorials/gymnasium_basics/handling_time_limits/) explains termination versus truncation.
+- [Stable-Baselines3 RL tips](https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html) discusses evaluation, multiple runs and continuous observations.

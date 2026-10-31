@@ -1,8 +1,8 @@
 # Minecraft Parkour RL
 
-A small course project exploring whether a Q-learning agent can learn to cross a Minecraft parkour gap. The agent reads game state and presses movement keys through the [Minescript](https://minescript.net/) mod. The course and the learner are Python files your team can read and change.
+A small course project exploring whether a Q-learning agent can learn to cross a small Minecraft parkour course. The agent reads game state and presses movement keys through the [Minescript](https://minescript.net/) mod. The course and the learner are Python files your team can read and change.
 
-**Project status:** Early prototype. The course is one straight gap; it is not a general parkour agent. The official-launcher, single-player setup has not been tested end to end yet, including on macOS and Windows. Timing, resets, state representation, and learning still need validation. Earlier smoke tests used a different server-based setup; do not treat them as results for this version.
+**Project status:** Early prototype. The course has three straight jumps, including a raised platform; it is not a general parkour agent. The official-launcher, single-player setup has not been tested end to end yet, including on macOS and Windows. Timing, resets, state representation, and learning still need validation. Do not treat a few trial runs as evidence of learning.
 
 ## Get started
 
@@ -27,8 +27,8 @@ The first command overwrites blocks around the world's origin to build the cours
 
 - [`parkour/build_course.py`](parkour/build_course.py) creates the start, gap, catch floor and goal.
 - [`parkour/course.json`](parkour/course.json) defines the start, goal, direction and fall boundary; keep it consistent with the builder.
-- [`parkour/agent.py`](parkour/agent.py) observes the player, chooses actions, scores outcomes and updates the Q table.
+- [`parkour/agent.py`](parkour/agent.py) observes the player, chooses actions, scores outcomes and updates learned weights.
 - [`docs/setup.md`](docs/setup.md) gives installation, requirements, run instructions and troubleshooting.
 - [`docs/code.md`](docs/code.md) explains the state, actions, rewards, learning update and limitations.
 
-Logs and Q tables are created locally in the game's `minescript` folder. They are not shared automatically. This repository does not contain Minecraft, the mods, a world save, or an installer.
+Logs and weights are created locally in the game's `minescript` folder. They are not shared automatically. This repository does not contain Minecraft, the mods, a world save, or an installer.

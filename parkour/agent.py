@@ -5,7 +5,7 @@ The observation scans ahead toward the next gap:
   lip     distance to the edge the agent must jump from
   gap     width of the missing span
   height  landing surface relative to the feet
-  speed   horizontal blocks per tick
+  speed   measured horizontal displacement per tick
   vy      vertical velocity
   ground  standing on a block
 
@@ -16,10 +16,10 @@ Edit ``course.json`` for a different start, goal, or fall height.
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import random
-import sys
 import time
 from pathlib import Path
 
@@ -27,7 +27,7 @@ import minescript
 
 HERE = Path(__file__).resolve().parent
 COURSE_FILE = HERE / "course.json"
-Q_FILE = HERE / "q-table.json"
+Q_FILE = HERE / "linear-q.json"
 LOG_FILE = HERE / "agent-log.jsonl"
 
 ACTIONS = ("idle", "walk", "run", "walk_jump", "run_jump")
@@ -47,16 +47,10 @@ FALL_REWARD = -10.0
 MAX_STEPS = 80
 LOOKAHEAD = 8
 
-DEFAULT_COURSE = {
-    "start": [0.2, -60.0, 0.5],
-    "yaw": 90.0,
-    "goal": [-8.5, -60.0, 0.5],
-    "fall_y": -61.2,
-    "goal_radius": 1.2,
-}
-
 NON_SOLID = (
     "air",
+    "cave_air",
+    "void_air",
     "water",
     "lava",
     "short_grass",
@@ -82,10 +76,9 @@ PRESS = {
 
 
 def load_course() -> dict:
-    if COURSE_FILE.exists():
-        return {**DEFAULT_COURSE, **json.loads(COURSE_FILE.read_text())}
-    COURSE_FILE.write_text(json.dumps(DEFAULT_COURSE, indent=2) + "\n")
-    return dict(DEFAULT_COURSE)
+    if not COURSE_FILE.exists():
+        raise FileNotFoundError("Copy course.json into the minescript folder with agent.py")
+    return json.loads(COURSE_FILE.read_text())
 
 
 COURSE = load_course()
@@ -132,7 +125,8 @@ def do_action(name: str) -> None:
 
 
 def solid(block: str) -> bool:
-    return bool(block) and not any(word in block for word in NON_SOLID)
+    """Treat only explicitly listed block IDs as non-solid (stairs are solid)."""
+    return bool(block) and block.split(":")[-1].split("[")[0] not in NON_SOLID
 
 
 def bin_distance(distance: float | None) -> int:
@@ -162,8 +156,8 @@ def bin_speed(speed: float) -> int:
     return 3
 
 
-def scan(x: float, y: float, z: float) -> tuple[int, int, float | None]:
-    """Return (lip bin, gap bin, landing height) looking along the course yaw."""
+def scan(x: float, y: float, z: float) -> tuple[float | None, int, float | None]:
+    """Return distance to gap, gap width and estimated landing height."""
     base = math.floor(y - 0.01)
     columns: list[tuple[int, int]] = []
     positions: list[list[int]] = []
@@ -189,7 +183,7 @@ def scan(x: float, y: float, z: float) -> tuple[int, int, float | None]:
 
     first_open = next((i for i, surface in enumerate(surfaces) if surface is None), None)
     if first_open is None:
-        return 6, 0, 0.0
+        return None, 0, None
 
     px, pz = columns[first_open]
     if abs(DX) >= abs(DZ):
@@ -204,10 +198,10 @@ def scan(x: float, y: float, z: float) -> tuple[int, int, float | None]:
         gap += 1
     landing = first_open + gap
     height = None if landing >= len(surfaces) else surfaces[landing] - y
-    return bin_distance(distance), min(9, gap), height
+    return distance, min(9, gap), height
 
 
-def observe(speed: float, player=None) -> tuple[str, dict]:
+def observe(speed: float, player=None) -> tuple[tuple[str, ...], dict]:
     player = player or minescript.player()
     x, y, z = player.position
     vy = player.velocity[1]
@@ -222,33 +216,77 @@ def observe(speed: float, player=None) -> tuple[str, dict]:
     grounded = support and snapped and vy <= 0.05
 
     lip, gap, height = scan(x, y, z)
-    if height is None or abs(height) < 0.5:
-        height_bin = 1
-    elif height < 0:
-        height_bin = 0
-    else:
-        height_bin = 2
-    vy_bin = 0 if vy > 0.1 else 1 if vy > -0.4 else 2
-    state = f"{lip},{gap},{height_bin},{bin_speed(speed)},{vy_bin},{int(grounded)}"
+    vx, vy, vz = player.velocity
+    forward_velocity = vx * DX + vz * DZ
+    lateral_velocity = vx * (-DZ) + vz * DX
+    distance_to_goal = math.dist((x, y, z), GOAL)
+
+    # These sparse, shared features let similar states share learned weights.
+    # Paired features allow the jump decision to depend on both edge and speed.
+    lip_bin = bin_distance(lip)
+    speed_bin = bin_speed(speed) if forward_velocity >= 0 else -1
+    height_bin = "unknown" if height is None else "down" if height < -0.5 else "up" if height > 0.5 else "level"
+    vertical_bin = "up" if vy > 0.1 else "down" if vy < -0.4 else "level"
+    goal_bin = min(8, int(distance_to_goal / 4))
+    side_bin = -1 if lateral_velocity < -0.03 else 1 if lateral_velocity > 0.03 else 0
+    lateral_offset = (x - START[0]) * (-DZ) + (z - START[2]) * DX
+    offset_bin = -1 if lateral_offset < -0.35 else 1 if lateral_offset > 0.35 else 0
+    yaw_error = (player.yaw - YAW + 180) % 360 - 180
+    yaw_bin = -1 if yaw_error < -10 else 1 if yaw_error > 10 else 0
+    state = (
+        "bias", f"lip:{lip_bin}", f"gap:{gap}", f"height:{height_bin}",
+        f"speed:{speed_bin}", f"vertical:{vertical_bin}",
+        f"side:{side_bin}", f"offset:{offset_bin}", f"yaw:{yaw_bin}",
+        f"ground:{int(grounded)}", f"goal:{goal_bin}",
+        f"takeoff:{lip_bin},{speed_bin},{int(grounded)}",
+        f"jump:{gap},{height_bin},{speed_bin}",
+    )
     return state, {
-        "x": x,
-        "y": y,
-        "z": z,
-        "lip": lip,
-        "gap": gap,
-        "height": height,
-        "speed": speed,
-        "vy": vy,
-        "ground": grounded,
+        "x": x, "y": y, "z": z, "lip": lip, "gap": gap,
+        "height": height, "speed": speed, "vx": vx, "vy": vy, "vz": vz,
+        "forward_velocity": forward_velocity, "lateral_velocity": lateral_velocity,
+        "goal_distance": distance_to_goal, "yaw_error": yaw_error,
+        "lateral_offset": lateral_offset, "ground": grounded,
     }
 
 
-def choose(q: dict[str, list[float]], state: str, epsilon: float) -> int:
-    if random.random() < epsilon or state not in q:
+def values(q: dict[str, list[float]], state: tuple[str, ...]) -> list[float]:
+    """Linear value approximation: sum weights of the active features."""
+    result = [0.0] * len(ACTIONS)
+    for feature in state:
+        weights = q.get(feature)
+        if weights is not None:
+            for action, weight in enumerate(weights):
+                result[action] += weight
+    return result
+
+
+def choose(q: dict[str, list[float]], state: tuple[str, ...], epsilon: float) -> int:
+    if random.random() < epsilon:
         return random.randrange(len(ACTIONS))
-    row = q[state]
+    row = values(q, state)
     best = max(row)
     return random.choice([i for i, value in enumerate(row) if value == best])
+
+
+def potential(distance: float) -> float:
+    # Bounded distance shaping; all true terminal states have potential zero.
+    return -0.1 * min(distance, 40.0)
+
+
+def reward_for_step(old_distance: float, new_distance: float, outcome: str | None) -> float:
+    """Goal-focused reward with discounted potential-based shaping."""
+    base = GOAL_REWARD if outcome == "goal" else FALL_REWARD if outcome == "fall" else -STEP_PENALTY
+    next_potential = 0.0 if outcome is not None else potential(new_distance)
+    return base + GAMMA * next_potential - potential(old_distance)
+
+
+def update_weights(q: dict[str, list[float]], state: tuple[str, ...], action: int, target: float) -> None:
+    """Move the chosen action value toward the target using active features."""
+    current = values(q, state)[action]
+    adjustment = ALPHA * (target - current) / len(state)
+    for feature in state:
+        q.setdefault(feature, [0.0] * len(ACTIONS))[action] += adjustment
 
 
 def wait_alive(timeout: float) -> bool:
@@ -325,69 +363,58 @@ def episode(q: dict[str, list[float]], number: int, epsilon: float, learn: bool 
     player = minescript.player()
     state, info = observe(0.0, player)
     outcome = "timeout"
-    crossed = False
+    started = time.monotonic()
     for step in range(MAX_STEPS):
         action = choose(q, state, epsilon)
         name = ACTIONS[action]
-        x0, _, z0 = player.position
         do_action(name)
         try:
             speed = wait_ticks(TICKS)
         finally:
-            force_release()
+            set_keys(False, False, False)
         player = minescript.player()
         x1, y1, z1 = player.position
 
-        progress = (x1 - x0) * DX + (z1 - z0) * DZ
-        reward = 2.0 * progress - STEP_PENALTY
-        terminal = False
+        terminal_outcome = None
         if y1 < FALL_Y:
-            outcome = "fall"
-            reward = FALL_REWARD
-            terminal = True
-
+            outcome = terminal_outcome = "fall"
         next_state, next_info = observe(speed, player)
-        if not terminal and next_info["ground"] and at_goal(x1, y1, z1):
-            outcome = "goal"
-            reward = GOAL_REWARD
-            terminal = True
-        landed = not crossed and info["gap"] > 0 and next_info["gap"] == 0 and next_info["ground"]
-        if landed:
-            reward += 3.0
-            crossed = True
+        if terminal_outcome is None and next_info["ground"] and at_goal(x1, y1, z1):
+            outcome = terminal_outcome = "goal"
+        terminal = terminal_outcome is not None
+        reward = reward_for_step(info["goal_distance"], next_info["goal_distance"], terminal_outcome)
 
         if learn:
-            q.setdefault(state, [0.0] * len(ACTIONS))
-            # A terminal state has no future value to add to its reward.
-            if terminal:
-                target = reward
-            else:
-                next_values = q.setdefault(next_state, [0.0] * len(ACTIONS))
-                target = reward + GAMMA * max(next_values)
-            q[state][action] += ALPHA * (target - q[state][action])
+            target = reward if terminal else reward + GAMMA * max(values(q, next_state))
+            update_weights(q, state, action, target)
         log(
             episode=number,
             step=step,
-            state=state,
+            state=list(state),
             action=name,
-            next=next_state,
+            next=list(next_state),
             reward=round(reward, 3),
-            landed=landed,
             x=round(x1, 3),
             y=round(y1, 3),
             z=round(z1, 3),
-            lip=next_info["lip"],
+            lip=None if next_info["lip"] is None else round(next_info["lip"], 3),
             gap=next_info["gap"],
             height=None if next_info["height"] is None else round(next_info["height"], 2),
             speed=round(speed, 3),
+            vx=round(next_info["vx"], 3),
             vy=round(next_info["vy"], 3),
+            vz=round(next_info["vz"], 3),
+            goal_distance=round(next_info["goal_distance"], 3),
+            yaw_error=round(next_info["yaw_error"], 3),
+            lateral_offset=round(next_info["lateral_offset"], 3),
+            base_reward=GOAL_REWARD if terminal_outcome == "goal" else FALL_REWARD if terminal_outcome == "fall" else -STEP_PENALTY,
             ground=next_info["ground"],
         )
         if terminal:
             break
         state, info = next_state, next_info
     force_release()
-    log(episode=number, outcome=outcome, epsilon=round(epsilon, 3), states=len(q), learn=learn)
+    log(episode=number, outcome=outcome, epsilon=round(epsilon, 3), features=len(q), learn=learn, steps=step + 1, seconds=round(time.monotonic() - started, 3))
     return outcome
 
 
@@ -396,32 +423,46 @@ def run_batch(
 ) -> dict[str, int]:
     q = load_q()
     LOG_FILE.touch()
-    log(event="start", episodes=episodes, epsilon=epsilon_start, end=epsilon_end, states=len(q), learn=learn)
+    log(event="start", episodes=episodes, epsilon=epsilon_start, end=epsilon_end, features=len(q), learn=learn)
     outcomes = {"goal": 0, "fall": 0, "timeout": 0}
     for number in range(1, episodes + 1):
         span = max(1, episodes - 1)
-        epsilon = 0.0 if not learn else max(epsilon_end, epsilon_start - (epsilon_start - epsilon_end) * (number - 1) / span)
+        epsilon = epsilon_start if not learn else epsilon_start + (epsilon_end - epsilon_start) * (number - 1) / span
         outcome = episode(q, number, epsilon, learn)
         outcomes[outcome] += 1
         if learn:
             save_q(q)
-        log(event="episode", episode=number, outcome=outcome, epsilon=round(epsilon, 3), **outcomes, states=len(q), learn=learn)
+        log(event="episode", episode=number, outcome=outcome, epsilon=round(epsilon, 3), **outcomes, features=len(q), learn=learn)
         if number % 5 == 0 or number == episodes or outcome == "goal":
             minescript.echo(
                 f"{number}/{episodes} {outcome} | goals {outcomes['goal']} "
-                f"falls {outcomes['fall']} states {len(q)}"
+                f"falls {outcomes['fall']} features {len(q)}"
             )
     force_release()
     return outcomes
 
 
 def main() -> None:
-    episodes = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-    epsilon_start = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
-    epsilon_end = float(sys.argv[3]) if len(sys.argv) > 3 else 0.05
+    parser = argparse.ArgumentParser(description="Train or evaluate a parkour agent")
+    parser.add_argument("episodes", nargs="?", type=int, default=3)
+    parser.add_argument("epsilon_start", nargs="?", type=float, default=0.5)
+    parser.add_argument("epsilon_end", nargs="?", type=float, default=0.05)
+    parser.add_argument("--seed", type=int, default=None)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--eval", action="store_true", help="evaluate saved weights without learning")
+    mode.add_argument("--random", action="store_true", help="evaluate random actions without learning")
+    args = parser.parse_args()
+    if args.episodes < 1 or not 0 <= args.epsilon_start <= 1 or not 0 <= args.epsilon_end <= 1:
+        parser.error("episodes must be positive and epsilon values must be between 0 and 1")
+    if args.eval and not Q_FILE.exists():
+        raise FileNotFoundError("No saved weights found; train before using --eval")
+    random.seed(args.seed)
+    learning = not (args.eval or args.random)
+    epsilon_start = 0.0 if args.eval else 1.0 if args.random else args.epsilon_start
+    log(event="run_config", seed=args.seed, mode="train" if learning else "random" if args.random else "eval")
     try:
-        outcomes = run_batch(episodes, epsilon_start, epsilon_end)
-        minescript.echo(f"agent done: {outcomes} | q-table {Q_FILE.name}")
+        outcomes = run_batch(args.episodes, epsilon_start, args.epsilon_end, learn=learning)
+        minescript.echo(f"agent done: {outcomes} | weights {Q_FILE.name}")
     finally:
         force_release()
 
