@@ -30,5 +30,6 @@ The first command overwrites blocks around the world's origin to build the cours
 - [`parkour/agent.py`](parkour/agent.py) observes the player, chooses actions, scores outcomes and updates learned weights.
 - [`docs/setup.md`](docs/setup.md) gives installation, requirements, run instructions and troubleshooting.
 - [`docs/code.md`](docs/code.md) explains the state, actions, rewards, learning update and limitations.
+- [`docs/test-results.md`](docs/test-results.md) describes the latest in-game smoke test and its limits.
 
 Logs and weights are created locally in the game's `minescript` folder. They are not shared automatically. This repository does not contain Minecraft, the mods, a world save, or an installer.
