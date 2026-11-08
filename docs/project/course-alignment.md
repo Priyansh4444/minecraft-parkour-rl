@@ -16,4 +16,4 @@ Checkpoint schema version 3 records this rule and rejects older tables. Independ
 
 The three-jump scripted controller is calibrated only on the training layout, then frozen as preset actions. Reserved starting positions and layouts remain out of calibration and training. This is an environment/baseline check, not extra training data for the learned policy or proof of generalization.
 
-Keep the initial work to a single jump, then the proposed 3–5-jump course, ordinary platforms, the specified sparse rewards and the optional one-time platform bonus comparison. No hunger/potions/neos/headhitters, pretrained general policies or extra algorithms are required for the main result. The headless bot/server is infrastructure and still needs live timing/reset tests.
+Keep the initial work to a single jump, then the proposed 3–5-jump course, ordinary platforms, the specified sparse rewards and the optional one-time platform bonus comparison. No hunger/potions/neos/headhitters, pretrained general policies or extra algorithms are required for the main result. The headless bot/server is infrastructure and still needs live timing/reset observations.

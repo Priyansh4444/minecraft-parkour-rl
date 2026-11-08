@@ -17,7 +17,7 @@ The [parkour environment source](https://github.com/andrearante12/Minecraft-Rein
 
 ### Minecraft-RL-env
 
-This [Mineflayer parkour framework](https://github.com/K3YB04RD-w4rri0r/Minecraft-RL-env) is relevant to our transport. Its README alone is not evidence of a successful general policy. We retain explicit observation validation, goal-based rewards and live tests instead of copying its placeholders.
+This [Mineflayer parkour framework](https://github.com/K3YB04RD-w4rri0r/Minecraft-RL-env) is relevant to our transport. Its README alone is not evidence of a successful general policy. We retain explicit observation validation, goal-based rewards and live observations instead of copying its placeholders.
 
 ## Parkour beyond Minecraft
 

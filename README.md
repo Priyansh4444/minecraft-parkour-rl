@@ -9,7 +9,8 @@ parkour/
   learning/       Q-learning and compact PPO
   minecraft/      bot connection and server launcher
   courses/        fixed course definitions and reserved starts
-bridge/           Mineflayer transport and physics checks
+bridge/           TypeScript Mineflayer transport
+scripts/          Bash formatting and type-check commands
 tools/
   courses/        map import and random-course generation
   experiments/    independent-seed experiment runner

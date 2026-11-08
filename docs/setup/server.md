@@ -35,10 +35,11 @@ For a new working world, start Java directly once and enter the course settings 
 ```text
 gamerule fall_damage false
 gamerule immediate_respawn true
+setworldspawn 19 -6 13
 stop
 ```
 
-These settings persist in the working world. The project launcher grants operator permission to `Watcher` for resets but does not change gamerules or construct courses.
+The spawn command above is for the Map 1 starting platform; use a safe starting position if preparing a different course. These settings persist in the working world. The project launcher grants operator permission to `Watcher` for resets but does not change gamerules or construct courses.
 
 ## Start headlessly
 
