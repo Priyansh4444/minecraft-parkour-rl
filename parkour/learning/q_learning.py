@@ -17,7 +17,7 @@ ACTIONS = ("idle", "walk", "run", "walk_jump", "run_jump")
 BUTTONS = ((0, 0, 0, 0, 0), (1, 0, 0, 0, 0), (1, 0, 0, 1, 0), (1, 0, 1, 0, 0), (1, 0, 1, 1, 0))
 ALPHA, GAMMA = 0.1, 0.99
 DIRECTIONS = {0: (0, 1), 90: (-1, 0), 180: (0, -1), 270: (1, 0)}
-# Each complete tuple identifies one table row. Nearby rows share no weights.
+# each complete tuple identifies one table row. nearby rows share no weights.
 BINS = {
     "forward_distance": (0.25, -2, 8),
     "lateral_distance": (0.5, -2, 2),
@@ -25,7 +25,7 @@ BINS = {
     "forward_velocity": (0.05, -0.4, 0.4),
     "vertical_velocity": (0.1, -1.2, 0.6),
 }
-GRID = {"radius": 0, "down": 0, "up": 0}  # Transport needs a grid; it is not a learning input.
+GRID = {"radius": 0, "down": 0, "up": 0}  # transport needs a grid; it is not a learning input.
 SCHEMA = {
     "version": 3,
     "algorithm": "tabular-q",
@@ -45,6 +45,16 @@ def point(value):
     return isinstance(value, list) and len(value) == 3 and all(number(v) for v in value)
 
 
+def position_values(value):
+    """Read named coordinates from a course file in Minecraft x/y/z order."""
+    if not isinstance(value, dict) or set(value) != {"x", "y", "z"}:
+        raise ValueError("A position requires named x, y and z coordinates")
+    coordinates = [value["x"], value["y"], value["z"]]
+    if not point(coordinates):
+        raise ValueError("Position coordinates must be finite numbers")
+    return coordinates
+
+
 @dataclass(frozen=True)
 class Profile:
     start: tuple
@@ -57,13 +67,34 @@ class Profile:
     @classmethod
     def load(cls, path):
         data = json.loads(Path(path).read_text())
+        if isinstance(data, dict) and "start_position" in data:
+            landing_positions = data.get("landing_positions")
+            action_names = data.get("scripted_actions", [])
+            if not isinstance(landing_positions, list):
+                raise ValueError("landing_positions must be a list of named positions")
+            if not isinstance(action_names, list) or any(
+                name not in ACTIONS for name in action_names
+            ):
+                raise ValueError("scripted_actions must use action names such as run_jump")
+            # recorded runs use the original coordinate-array form. decode both into
+            # the same immutable course so existing model contracts remain valid.
+            data.update(
+                {
+                    "start": position_values(data["start_position"]),
+                    "yaw": data.get("facing_yaw_degrees"),
+                    "platforms": [position_values(position) for position in landing_positions],
+                    "fall_y": data.get("fall_below_y"),
+                    "max_steps": data.get("max_decisions", 80),
+                    "script": [ACTIONS.index(name) for name in action_names],
+                }
+            )
         if not isinstance(data, dict) or not point(data.get("start")):
             raise ValueError("Course requires three finite start coordinates")
         platforms = data.get("platforms")
         if (
             not isinstance(platforms, list)
             or len(platforms) < 2
-            or not all(point(p) for p in platforms)
+            or not all(point(course) for course in platforms)
         ):
             raise ValueError("Course requires start and landing platform centers at feet height")
         yaw, fall = data.get("yaw"), data.get("fall_y")
@@ -83,7 +114,7 @@ class Profile:
             if x * dx + z * dz <= 0 or abs(-x * dz + z * dx) > 0.01:
                 raise ValueError("Platforms must follow a straight lane in the facing direction")
         start = data["start"]
-        if not on_platform(start, platforms[0]) or fall >= min(p[1] for p in platforms):
+        if not on_platform(start, platforms[0]) or fall >= min(course[1] for course in platforms):
             raise ValueError("Start must be on platform zero and fall_y below all platforms")
         return cls(
             tuple(start),
@@ -120,7 +151,7 @@ def state_key(profile, frame, highest):
     target = profile.platforms[min(highest + 1, len(profile.platforms) - 1)]
     x, y, z = frame["position"]
     vx, vy, vz = frame["velocity"]
-    # Exact cardinal vectors keep roundoff such as cos(90°) from creating a false sideways bin.
+    # exact cardinal vectors keep roundoff such as cos(90°) from creating a false sideways bin.
     dx, dz = DIRECTIONS[int(profile.yaw) % 360]
     values = (
         (target[0] - x) * dx + (target[2] - z) * dz,
@@ -221,19 +252,21 @@ class TabularRunner:
         self.profile, self.backend, self.ticks, self.shaped = profile, backend, ticks, shaped
 
     def episode(self, table, rng, epsilon, mode, log):
-        p = self.profile
+        course = self.profile
         frame = validate_frame(
-            self.backend._request("parkour_reset", start=list(p.start), yaw=p.yaw, grid=GRID)
+            self.backend._request(
+                "parkour_reset", start=list(course.start), yaw=course.yaw, grid=GRID
+            )
         )
-        if landed_platform(p, frame) != 0 or math.dist(frame["position"], p.start) > 0.15:
+        if landed_platform(course, frame) != 0 or math.dist(frame["position"], course.start) > 0.15:
             raise RuntimeError("Reset did not return to the configured starting platform")
         correction = frame["correction_count"]
         highest = 0
-        state = state_key(p, frame, highest)
+        state = state_key(course, frame, highest)
         total, tick_total, started = 0.0, 0, time.monotonic()
-        for step in range(p.max_steps):
+        for step in range(course.max_steps):
             action = (
-                (p.script[step] if step < len(p.script) else 0)
+                (course.script[step] if step < len(course.script) else 0)
                 if mode == "scripted"
                 else choose(table, state, epsilon, rng)
             )
@@ -246,23 +279,25 @@ class TabularRunner:
                 raise RuntimeError(
                     "Unexpected action duration or server correction; transition discarded"
                 )
-            landed = landed_platform(p, after)
+            landed = landed_platform(course, after)
             old_highest = highest
             highest = max(highest, landed if landed is not None else 0)
             outcome = (
                 "fall"
-                if after["health"] <= 0 or after["position"][1] < p.fall_y
+                if after["health"] <= 0 or after["position"][1] < course.fall_y
                 else "goal"
-                if landed == len(p.platforms) - 1
+                if landed == len(course.platforms) - 1
                 else "timeout"
-                if step + 1 == p.max_steps
+                if step + 1 == course.max_steps
                 else "running"
             )
             terminated = outcome in ("goal", "fall")
             truncated = outcome == "timeout"
             episode_end = terminated or truncated
-            reward = reward_for(outcome, landed, old_highest, len(p.platforms) - 1, self.shaped)
-            next_state = state_key(p, after, highest)
+            reward = reward_for(
+                outcome, landed, old_highest, len(course.platforms) - 1, self.shaped
+            )
+            next_state = state_key(course, after, highest)
             if mode == "train":
                 update_q(table, state, action, reward, next_state, terminated)
             total += reward
@@ -290,7 +325,7 @@ class TabularRunner:
                     "success": outcome == "goal",
                     "return": total,
                     "max_platform": highest,
-                    "progress": highest / (len(p.platforms) - 1),
+                    "progress": highest / (len(course.platforms) - 1),
                     "steps": step + 1,
                     "seconds": time.monotonic() - started,
                     "client_ticks": tick_total,

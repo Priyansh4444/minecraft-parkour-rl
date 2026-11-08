@@ -1,8 +1,31 @@
 {
-  "start": [19.5, -6.0, 13.5],
-  "yaw": 90.0,
-  "platforms": [[19.5, -6.0, 13.5], [17.5, -6.0, 13.5]],
-  "fall_y": -8.0,
-  "max_steps": 80,
-  "script": [3, 1, 1, 1, 1, 1, 1]
+  "start_position": {
+    "x": 19.5,
+    "y": -6.0,
+    "z": 13.5
+  },
+  "facing_yaw_degrees": 90.0,
+  "landing_positions": [
+    {
+      "x": 19.5,
+      "y": -6.0,
+      "z": 13.5
+    },
+    {
+      "x": 17.5,
+      "y": -6.0,
+      "z": 13.5
+    }
+  ],
+  "fall_below_y": -8.0,
+  "max_decisions": 80,
+  "scripted_actions": [
+    "walk_jump",
+    "walk",
+    "walk",
+    "walk",
+    "walk",
+    "walk",
+    "walk"
+  ]
 }

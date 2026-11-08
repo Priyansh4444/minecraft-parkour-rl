@@ -12,7 +12,10 @@ from pathlib import Path
 def simple_script(profile):
     """Hold forward, sprint and jump throughout; no geometry or timing lookup."""
     result = copy.deepcopy(profile)
-    result["script"] = [4] * result["max_steps"]
+    if "max_decisions" in result:
+        result["scripted_actions"] = ["run_jump"] * result["max_decisions"]
+    else:
+        result["script"] = [4] * result["max_steps"]
     return result
 
 
@@ -28,7 +31,15 @@ def generate(seed=17501, jumps=3):
         platforms.append([x - distance, y + rise, z])
         choices.append({"center_distance": distance, "height_change": rise})
     profile = simple_script(
-        dict(start=platforms[0].copy(), yaw=90, platforms=platforms, fall_y=77, max_steps=80)
+        dict(
+            start_position=dict(zip(("x", "y", "z"), platforms[0], strict=True)),
+            facing_yaw_degrees=90,
+            landing_positions=[
+                dict(zip(("x", "y", "z"), position, strict=True)) for position in platforms
+            ],
+            fall_below_y=77,
+            max_decisions=80,
+        )
     )
     xmin, xmax = math.floor(platforms[-1][0]) - 3, 1003
     ymin, ymax, zmin, zmax = 77, max(p[1] for p in platforms) + 4, 997, 1003
