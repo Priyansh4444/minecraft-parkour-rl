@@ -1,8 +1,8 @@
 // State and bounded client stepping for static parkour worlds.
-import vec3 from "vec3";
+import { Vec3 } from "vec3";
+import type { Grid, ParkourBot, ResetRequest, StepRequest } from "./protocol.ts";
 
-const { Vec3 } = vec3;
-const CONTROL_NAMES = ["forward", "back", "left", "right", "jump", "sprint"];
+const CONTROL_NAMES = ["forward", "back", "left", "right", "jump", "sprint"] as const;
 const HAZARDS = new Set([
   "water",
   "lava",
@@ -16,7 +16,7 @@ const HAZARDS = new Set([
   "powder_snow",
 ]);
 
-export function validateGrid(grid = { radius: 7, down: 9, up: 3 }) {
+export function validateGrid(grid: Grid = { radius: 7, down: 9, up: 3 }) {
   if (
     !grid ||
     ![grid.radius, grid.down, grid.up].every(Number.isInteger) ||
@@ -35,7 +35,7 @@ export function validateGrid(grid = { radius: 7, down: 9, up: 3 }) {
   return { ...grid, width, height };
 }
 
-export function decodeAction(action) {
+export function decodeAction(action: unknown) {
   const limits = [3, 3, 2, 2, 3];
   if (
     !Array.isArray(action) ||
@@ -59,7 +59,7 @@ export function decodeAction(action) {
   };
 }
 
-export function readTerrain(bot, requestedGrid) {
+export function readTerrain(bot: ParkourBot, requestedGrid?: Grid) {
   const grid = validateGrid(requestedGrid);
   const origin = bot.entity.position.floored();
   const cells = grid.width * grid.width * grid.height;
@@ -82,19 +82,25 @@ export function readTerrain(bot, requestedGrid) {
   return { shape: [3, grid.height, grid.width, grid.width], data };
 }
 
-export function minecraftYaw(yaw) {
+export function minecraftYaw(yaw: number) {
   return ((180 - (yaw * 180) / Math.PI + 540) % 360) - 180;
 }
 
 export class SteppedParkour {
-  constructor(bot, getTick) {
+  readonly bot: ParkourBot;
+  readonly getTick: () => number;
+  correctionCount: number;
+
+  constructor(bot: ParkourBot, getTick: () => number) {
     this.bot = bot;
     this.getTick = getTick;
     this.correctionCount = 0;
-    bot.on("forcedMove", () => this.correctionCount++);
+    bot.on("forcedMove", () => {
+      this.correctionCount++;
+    });
   }
 
-  snapshot(grid, startTick = this.getTick()) {
+  snapshot(grid?: Grid, startTick = this.getTick()) {
     const bot = this.bot;
     const entity = bot.entity;
     // All reads here are synchronous: no physics event can split this snapshot.
@@ -129,16 +135,16 @@ export class SteppedParkour {
     this.bot.clearControlStates();
   }
 
-  observe(grid) {
+  observe(grid?: Grid) {
     validateGrid(grid);
     this.pause();
     return this.snapshot(grid);
   }
 
-  waitForBoundary(check, timeout, operation) {
+  waitForBoundary(check: () => boolean, timeout: number, operation: string) {
     const bot = this.bot;
-    return new Promise((resolve, reject) => {
-      let timer;
+    return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
       let completed = false;
       const cleanup = () => {
         clearTimeout(timer);
@@ -146,7 +152,7 @@ export class SteppedParkour {
         bot.removeListener("end", onEnd);
         bot.removeListener("error", onError);
       };
-      const finish = (error) => {
+      const finish = (error?: unknown) => {
         if (completed) return;
         completed = true;
         // Do this in the event listener, before a catch-up loop can advance again.
@@ -162,8 +168,9 @@ export class SteppedParkour {
           finish(error);
         }
       };
-      const onEnd = (reason) => finish(new Error(`Disconnected during ${operation}: ${reason}`));
-      const onError = (error) => finish(error);
+      const onEnd = (reason: string) =>
+        finish(new Error(`Disconnected during ${operation}: ${reason}`));
+      const onError = (error: Error) => finish(error);
       timer = setTimeout(() => finish(new Error(`Timed out during ${operation}`)), timeout);
       bot.on("physicsTick", onTick);
       bot.once("end", onEnd);
@@ -171,7 +178,7 @@ export class SteppedParkour {
     });
   }
 
-  async reset(request) {
+  async reset(request: ResetRequest) {
     const { start, yaw, grid } = request;
     validateGrid(grid);
     if (
@@ -206,7 +213,7 @@ export class SteppedParkour {
     return this.snapshot(grid, startTick);
   }
 
-  async step(request) {
+  async step(request: StepRequest) {
     const { ticks, grid } = request;
     validateGrid(grid);
     const { keys, yaw_delta: yawDelta } = decodeAction(request.action);
@@ -215,7 +222,7 @@ export class SteppedParkour {
     if (this.bot.physicsEnabled) throw new Error("Call parkour_reset before stepped actions");
     const yaw = minecraftYaw(this.bot.entity.yaw) + yawDelta;
     await this.bot.look(Math.PI - (yaw * Math.PI) / 180, 0, true);
-    for (const [name, pressed] of Object.entries(keys)) this.bot.setControlState(name, pressed);
+    for (const name of CONTROL_NAMES) this.bot.setControlState(name, keys[name]);
     const startTick = this.getTick();
     const advanced = this.waitForBoundary(
       () => this.getTick() - startTick >= ticks,

@@ -19,8 +19,8 @@ class MineflayerBackend:
             raise ValueError("This adapter only connects to a local Minecraft server")
         node = shutil.which("node")
         if node is None:
-            raise RuntimeError("Install Node.js 22 or newer, then run npm ci in bridge/")
-        bridge = Path(__file__).resolve().parents[2] / "bridge" / "headless.mjs"
+            raise RuntimeError("Install Node.js 22.18 or newer, then run npm ci in bridge/")
+        bridge = Path(__file__).resolve().parents[2] / "bridge" / "headless.ts"
         self.process = subprocess.Popen(
             [node, str(bridge)],
             stdin=subprocess.PIPE,

@@ -4,7 +4,7 @@ Both modes use a local Minecraft Java server and a Mineflayer bot. Headless mode
 
 ## Prepare once
 
-Use Python 3.12, Node.js 22 or newer, **Java 25**, and the Minecraft Java **26.1.2** server JAR. Check `java --version`: Java 21 cannot run this server. Supply the Java 25 executable with `--java` if it is not your default.
+Use Python 3.12, Node.js 22.18 or newer, **Java 25**, and the Minecraft Java **26.1.2** server JAR. Check `java --version`: Java 21 cannot run this server. Supply the Java 25 executable with `--java` if it is not your default.
 
 ```sh
 uv sync --extra ppo --python 3.12

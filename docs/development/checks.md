@@ -25,7 +25,7 @@ The command stops at the first failing check and returns a nonzero exit code. Th
 
 - [Ruff](https://docs.astral.sh/ruff/) formats Python, sorts imports and checks correctness, common bugs and outdated syntax.
 - [ty](https://docs.astral.sh/ty/) checks Python source, commands and tests against the installed dependencies. PPO must be installed so its library types resolve.
-- [Biome](https://biomejs.dev/) formats and lints the JavaScript bridge and its configuration.
+- [Biome](https://biomejs.dev/) formats and lints the TypeScript bridge and its configuration.
 - Python unittest and Node's test runner check learning behavior, saved models, world imports, course generation, stepping and spectator setup.
 
 Run individual checks when working on one part:

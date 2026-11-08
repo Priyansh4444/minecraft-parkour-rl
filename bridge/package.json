@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18.0"
   },
   "dependencies": {
     "mineflayer": "4.39.0",
@@ -15,8 +15,8 @@
     "typescript": "7.0.2"
   },
   "scripts": {
-    "check": "biome check . --error-on-warnings",
+    "check": "biome check . --error-on-warnings && tsc --noEmit",
     "format": "biome check --write .",
-    "test": "node --test parkour-state.test.mjs"
+    "test": "node --test *.test.ts"
   }
 }

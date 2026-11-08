@@ -1,19 +1,18 @@
-// A JSON-lines transport. The Python agent owns observations and learning.
+// A JSON-lines transport. Python owns observations and learning.
 import readline from "node:readline";
-import mineflayer from "mineflayer";
-import vec3 from "vec3";
-import { SteppedParkour } from "./parkour-state.mjs";
-
-const { Vec3 } = vec3;
+import mineflayer, { type Bot, type ControlState } from "mineflayer";
+import { Vec3 } from "vec3";
+import { SteppedParkour } from "./parkour-state.ts";
+import { type BridgeRequest, type ConnectRequest, parseRequest } from "./protocol.ts";
 
 // Keep dependency diagnostics out of the JSON response stream.
 console.log = (...args) => console.error(...args);
-let bot;
+let bot: Bot;
 let tick = 0;
-let disconnected;
-let parkour;
+let disconnected: string | undefined;
+let parkour: SteppedParkour;
 
-async function connect(options) {
+async function connect(options: ConnectRequest) {
   if (bot) throw new Error("Already connected");
   bot = mineflayer.createBot({
     host: options.host,
@@ -22,7 +21,9 @@ async function connect(options) {
     version: options.version,
     auth: "offline",
   });
-  bot.on("physicsTick", () => tick++);
+  bot.on("physicsTick", () => {
+    tick++;
+  });
   parkour = new SteppedParkour(bot, () => tick);
   bot.on("error", (error) => {
     disconnected = error.message;
@@ -34,9 +35,9 @@ async function connect(options) {
   bot.on("end", (reason) => {
     disconnected ||= `Disconnected: ${reason}`;
   });
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error("Timed out joining the local server")), 18000);
-    const onError = (error) => finish(error);
+    const onError = (error: Error) => finish(error);
     const onEnd = () => finish(new Error(disconnected || "Disconnected while joining"));
     const onSpawn = async () => {
       try {
@@ -47,7 +48,7 @@ async function connect(options) {
         finish(error);
       }
     };
-    function finish(error) {
+    function finish(error?: unknown) {
       clearTimeout(timer);
       bot.removeListener("error", onError);
       bot.removeListener("end", onEnd);
@@ -73,7 +74,7 @@ function snapshot() {
   };
 }
 
-async function handle(request) {
+async function handle(request: BridgeRequest) {
   if (request.op === "connect") return connect(request);
   if (request.op === "close") {
     if (bot) {
@@ -110,7 +111,7 @@ async function handle(request) {
         ) {
           throw new Error("Unknown control or non-boolean control value");
         }
-        bot.setControlState(name, pressed);
+        bot.setControlState(name as ControlState, pressed);
       }
       return true;
     case "look":
@@ -135,13 +136,15 @@ const input = readline.createInterface({ input: process.stdin });
 let pending = Promise.resolve();
 input.on("line", (line) => {
   pending = pending.then(async () => {
-    let request;
+    let request: BridgeRequest | undefined;
     try {
-      request = JSON.parse(line);
+      request = parseRequest(line);
       const result = await handle(request);
       process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     } catch (error) {
-      process.stdout.write(`${JSON.stringify({ id: request?.id, error: error.message })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ id: request?.id, error: error instanceof Error ? error.message : String(error) })}\n`,
+      );
     }
   });
 });
