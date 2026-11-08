@@ -1,6 +1,6 @@
 __pycache__/
 *.py[cod]
 .venv/
-agent-log.jsonl
-q-table.json
-linear-q.json
+.local/
+bridge/node_modules/
+.ruff_cache/

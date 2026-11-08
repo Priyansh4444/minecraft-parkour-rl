@@ -1,0 +1,22 @@
+{
+  "name": "minecraft-parkour-headless",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "mineflayer": "4.39.0",
+    "vec3": "0.1.10"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
+  },
+  "scripts": {
+    "check": "biome check . --error-on-warnings",
+    "format": "biome check --write .",
+    "test": "node --test parkour-state.test.mjs"
+  }
+}

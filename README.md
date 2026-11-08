@@ -1,35 +1,67 @@
-# Minecraft Parkour RL
+# Minecraft Parkour RL — CS175
 
-A small course project exploring whether a Q-learning agent can learn to cross a small Minecraft parkour course. The agent reads game state and presses movement keys through the [Minescript](https://minescript.net/) mod. The course and the learner are Python files your team can read and change.
+This CS175 project compares tabular Q-learning with random and scripted controllers on short Minecraft parkour courses. Compact PPO is an optional comparison using the same observations, actions and rewards.
 
-**Project status:** Early prototype. The course has three straight jumps, including a raised platform; it is not a general parkour agent. The official-launcher, single-player setup has not been tested end to end yet, including on macOS and Windows. Timing, resets, state representation, and learning still need validation. Do not treat a few trial runs as evidence of learning.
-
-## Get started
-
-You need Minecraft Java Edition, the official Minecraft Launcher, Python 3.12, Fabric, Fabric API and Minescript. Install compatible versions and configure them using the [complete setup guide](docs/setup.md). The guide covers macOS, Windows and Linux, including where to place the project files.
-
-Download this repository or clone it:
-
-```sh
-git clone https://github.com/Priyansh4444/minecraft-parkour-rl.git
-```
-
-Once setup is complete, create a **new superflat single-player world with cheats enabled**, then enter these commands in Minecraft chat, one at a time:
+## Folders
 
 ```text
-\build_course
-\agent 3 1.0 1.0
+parkour/
+  learning/       Q-learning and compact PPO
+  minecraft/      bot connection and server launcher
+  courses/        fixed course definitions and reserved starts
+bridge/           Mineflayer transport and physics checks
+tools/
+  courses/        map import and random-course generation
+  experiments/    independent-seed experiment runner
+tests/            learning, Minecraft, course and experiment checks
+docs/             setup, project, experiment and research guides
+.local/           local servers, worlds, checkpoints and logs
 ```
 
-The first command overwrites blocks around the world's origin to build the course; use a dedicated test world. The second runs three exploratory episodes. Copy the scripts into the Minecraft `minescript` folder as described in the setup guide first. A few episodes are a connection test, not evidence that the agent learned.
+Run commands from this folder. Install dependencies once:
 
-## Project files
+```sh
+uv sync --extra ppo --python 3.12
+npm ci --prefix bridge --ignore-scripts
+```
 
-- [`parkour/build_course.py`](parkour/build_course.py) creates the start, gap, catch floor and goal.
-- [`parkour/course.json`](parkour/course.json) defines the start, goal, direction and fall boundary; keep it consistent with the builder.
-- [`parkour/agent.py`](parkour/agent.py) observes the player, chooses actions, scores outcomes and updates learned weights.
-- [`docs/setup.md`](docs/setup.md) gives installation, requirements, run instructions and troubleshooting.
-- [`docs/code.md`](docs/code.md) explains the state, actions, rewards, learning update and limitations.
-- [`docs/test-results.md`](docs/test-results.md) describes the latest in-game smoke test and its limits.
+The server needs **Java 25** and Minecraft **26.1.2**. Follow [server setup](docs/setup/server.md) and [map import](docs/setup/maps.md) first.
 
-Logs and weights are created locally in the game's `minescript` folder. They are not shared automatically. This repository does not contain Minecraft, the mods, a world save, or an installer.
+## Headless
+
+Start a prepared server without a game window:
+
+```sh
+uv run python -m parkour.minecraft.server --directory .local/mc2612/server --java /path/to/java25/bin/java
+```
+
+In another terminal, train Q-learning:
+
+```sh
+uv run python -m parkour.learning.q_learning --course parkour/courses/proposal-map1-single.json --output .local/runs/q/seed-11/q --episodes 300 --seed 11
+```
+
+## Watch in Minecraft
+
+Start the same server with your Minecraft username:
+
+```sh
+uv run python -m parkour.minecraft.server --directory .local/mc2612/server --java /path/to/java25/bin/java --watch-player YourName
+```
+
+Open Minecraft Java 26.1.2 and connect to `127.0.0.1:25566`. Start the **same training command**. Your player enters spectator mode and follows `Watcher`. Closing your game window leaves training running. See [watching instructions](docs/setup/watching.md).
+
+## Development
+
+See [development checks](docs/development/checks.md) for formatting, linting, type checking and tests.
+
+- [How the code works](docs/project/guide.md)
+- [Proposal scope and evaluation](docs/project/proposal-scope.md)
+- [PPO comparison](docs/experiments/ppo.md)
+- [Simple baseline and randomized course](docs/experiments/random-course.md)
+
+```sh
+uv run --extra ppo python -m tools.development.check
+```
+
+Start with single-jump calibration, then the proposed three-jump course. Completing one fixed jump does not establish full-map navigation or generalization. After installation the training loop needs no internet; the server and computer must keep running.
