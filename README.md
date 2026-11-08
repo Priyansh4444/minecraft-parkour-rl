@@ -58,6 +58,7 @@ See [development checks](docs/development/checks.md) for formatting, linting and
 - [How the code works](docs/project/guide.md)
 - [Proposal scope and evaluation](docs/project/proposal-scope.md)
 - [PPO comparison](docs/experiments/ppo.md)
+- [Training across varied routes](docs/experiments/varied-routes.md)
 - [Simple baseline and randomized course](docs/experiments/random-course.md)
 
 ```sh
