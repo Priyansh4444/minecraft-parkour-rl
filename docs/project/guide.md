@@ -1,10 +1,12 @@
 # How the project works
 
+Read [the course format](course-format.md) for the JSON field names.
+
 ## Learning loop
 
 The Minecraft server hosts a working copy of the course. Mineflayer connects the bot. Python repeatedly reads its state, chooses an action, advances two client ticks, measures reward and updates the learner during training. Evaluation performs the same loop without updates.
 
-`learning/q_learning.py` groups the relative next-platform position, forward/vertical velocity, grounded status and highest platform index into seven integer bins. That complete tuple selects one row of five Q-values. Epsilon-greedy exploration and the one-step Q-learning update change one state/action value at a time. `learning/ppo.py` uses the same bins/actions/rewards with a small PPO network.
+`learning/q_learning.py` groups the relative next-platform position, forward/vertical velocity, grounded status and highest platform index into seven integer bins. That complete tuple selects one row of five Q-values. Epsilon-greedy exploration and the one-step Q-learning update change one state/action value at a time. `learning/ppo/` uses the same bins/actions/rewards with a small PPO network.
 
 The actions are idle, walk, run, walking jump and running jump. Base rewards are -0.01 per ordinary decision, +1 at the goal and -1 for a fall. A timeout ends an attempt but retains its next-state value. The optional one-time intermediate-platform bonus is a separate condition. Binning approximates the state; it does not guarantee a Markov representation.
 

@@ -6,9 +6,15 @@ Both learners receive the **same seven discretized values**: forward/lateral/hei
 
 The default reward remains -0.01 per ordinary decision, +1 for the final goal and -1 for a fall. There is no distance shaping, terrain grid, turning or sideways control. The optional one-time intermediate-platform bonus is a separate reward condition for both learners, not enabled for the initial sparse-reward runs.
 
-## Code and course concepts
+## Code layout
 
-`parkour/learning/ppo.py` adapts the proposal contract to Gymnasium and Stable-Baselines3 PPO. It imports the Q-learning implementation's state encoding, actions, reward and platform helpers. Tests replay identical frames/actions through both loops and check their states, rewards and episode outcomes. The learners share the observation/action/reward contract; their checkpoints and logs stay separate.
+- `environment.py` handles observations, actions, reward and episode endings.
+- `checkpoints.py` defines PPO settings and typed model, metadata and log paths.
+- `__main__.py` reads command-line options and starts training or evaluation.
+
+## Course concepts
+
+`parkour/learning/ppo/` adapts the proposal contract to Gymnasium and Stable-Baselines3 PPO. It imports the Q-learning implementation's state encoding, actions, reward and platform helpers. The learners share the observation/action/reward contract; their checkpoints and logs stay separate.
 
 PPO uses a small CPU policy with two 32-unit hidden layers. The algorithm follows the concepts in Lectures 11–13: a stochastic policy, value baseline, advantage estimates and the clipped policy update. Stable-Baselines3 implements the optimizer/algorithm; our code supplies the Minecraft environment and experiment interface. It is a separate model, not a replacement Q-table or a claim of general Minecraft ability.
 
