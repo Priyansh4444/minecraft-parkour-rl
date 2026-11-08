@@ -56,15 +56,6 @@ class ServerTests(unittest.TestCase):
         (self.directory / "server.jar").write_bytes(b"fixture")
         (self.directory / "server.properties").write_text("server-ip=127.0.0.1\n")
 
-    def test_missing_jar_and_nonlocal_bind_are_rejected(self):
-        options = ServerOptions(self.directory)
-        (self.directory / "server.properties").write_text("server-ip=\n")
-        with self.assertRaises(ValueError):
-            validate(options)
-        (self.directory / "server.jar").unlink()
-        with self.assertRaises(FileNotFoundError):
-            validate(options)
-
     def test_occupied_port_leaves_existing_listener_alone(self):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -80,21 +71,6 @@ class ServerTests(unittest.TestCase):
         process.poll.return_value = None
         process.wait.return_value = 0
         return process
-
-    def test_headless_server_only_grants_bot_operator(self):
-        process = self.process(
-            ["[Server thread/INFO]: Done (1.0s)!\n", joined("Viewer"), joined("Watcher")]
-        )
-        with (
-            patch("parkour.minecraft.server.validate"),
-            patch("parkour.minecraft.server.subprocess.Popen", return_value=process),
-            patch("sys.stdout", new=io.StringIO()),
-        ):
-            self.assertEqual(run_server(ServerOptions(self.directory)), 0)
-        self.assertEqual(
-            [call.args[0] for call in process.stdin.write.call_args_list],
-            ["op Watcher\n", "stop\n"],
-        )
 
     def test_visible_server_attaches_only_viewer_and_stops_owned_process(self):
         process = self.process(

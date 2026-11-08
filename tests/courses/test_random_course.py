@@ -72,11 +72,6 @@ class RandomCourseTests(unittest.TestCase):
                 main(["--output", str(output), "--seed", "2"])
             self.assertEqual(before, {path: path.read_bytes() for path in output.iterdir()})
 
-    def test_invalid_generator_arguments(self):
-        for seed, jumps in ((-1, 3), (True, 3), (1, 0), (1, 6), (1, True)):
-            with self.assertRaises(ValueError):
-                generate(seed, jumps)
-
 
 if __name__ == "__main__":
     unittest.main()

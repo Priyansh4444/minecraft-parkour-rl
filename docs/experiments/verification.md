@@ -4,7 +4,7 @@ Run from the repository root:
 
 ```sh
 uv run --extra ppo python -m unittest discover -s tests -v
-node --test bridge/parkour-state.test.mjs
+node --test bridge/parkour-state.test.ts
 ```
 
 After the folder migration, all 38 Python tests and six bridge tests passed. All three saved Q-tables and three compact PPO models loaded without file changes. Local guide links and protected map/checkpoint/proposal hashes were checked as well.

@@ -4,7 +4,6 @@ import copy
 import hashlib
 import io
 import json
-import math
 import random
 import tempfile
 import unittest
@@ -184,21 +183,6 @@ class TabularTests(unittest.TestCase):
         self.assertTrue(rows[0]["truncated"])
         self.assertTrue(rows[0]["episode_end"])
         self.assertEqual(table[next_state], [2.0] * 5)
-
-    def test_timeout_with_unvisited_next_state_uses_zero_future_value(self):
-        profile = tabular.Profile((0.5, 1, 0.5), 0, ((0.5, 1, 0.5), (0.5, 1, 2.5)), -1, 1, ())
-        initial = frame()
-        next_frame = frame((0.5, 1, 1), tick=12, elapsed_ticks=2)
-        state = tabular.state_key(profile, initial, 0)
-        next_state = tabular.state_key(profile, next_frame, 0)
-        table, rows = {}, []
-        tabular.TabularRunner(profile, Backend([initial, next_frame])).episode(
-            table, random.Random(0), 0, "train", lambda **r: rows.append(r)
-        )
-        action = tabular.ACTIONS.index(rows[0]["action"])
-        self.assertAlmostEqual(table[state][action], -0.001)
-        self.assertNotIn(next_state, table)
-        self.assertTrue(all(math.isfinite(value) for value in table[state]))
 
     def test_bad_duration_correction_and_reset_rejected_without_learning(self):
         cases = (

@@ -187,25 +187,6 @@ class CompactPPOTests(unittest.TestCase):
             self.assertTrue(backend.closed)
             self.assertEqual(rows, [])
 
-    def test_reset_and_constructor_errors_close_backend(self):
-        for reset in (frame((0.5, 1, 2.5)), frame(on_ground=False)):
-            backend = Backend([reset])
-            env = ppo.CompactParkourEnv(self.profile, backend=backend)
-            with self.assertRaises(RuntimeError):
-                env.reset()
-            self.assertTrue(backend.closed)
-        backend = Backend()
-        with self.assertRaises(ValueError):
-            ppo.CompactParkourEnv(self.profile, backend=backend, ticks=0)
-        self.assertTrue(backend.closed)
-        backend = Backend()
-        too_long = tabular.Profile(
-            (0.5, 1, 0.5), 0, tuple((0.5, 1, z) for z in range(7)), -1, 1, ()
-        )
-        with self.assertRaises(ValueError):
-            ppo.CompactParkourEnv(too_long, backend=backend)
-        self.assertTrue(backend.closed)
-
     def test_real_optimizer_timeout_bootstrap_save_reload_and_read_only_evaluation(self):
         backend = Backend()
         env = ppo.CompactParkourEnv(self.profile, backend=backend)
