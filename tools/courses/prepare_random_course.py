@@ -1,4 +1,4 @@
-"""Freeze a small seeded evaluation course; never connect to or train in Minecraft."""
+"""Generate a seeded straight course; CLI output is reserved for evaluation."""
 
 import argparse
 import copy
@@ -19,9 +19,13 @@ def simple_script(profile):
     return result
 
 
-def generate(seed=17501, jumps=3):
+def generate(seed=17501, jumps=3, *, purpose="evaluation"):
     if type(seed) is not int or seed < 0 or type(jumps) is not int or not 1 <= jumps <= 5:
         raise ValueError("Use a nonnegative integer seed and one to five jumps")
+    if purpose not in ("training", "evaluation"):
+        raise ValueError("purpose must be training or evaluation")
+    if purpose == "training" and seed == 17501:
+        raise ValueError("Seed 17501 is reserved for evaluation")
     rng = random.Random(seed)
     platforms, choices = [[1000.5, 80, 1000.5]], []
     for _ in range(jumps):
@@ -56,7 +60,9 @@ def generate(seed=17501, jumps=3):
         jumps=jumps,
         choices=choices,
         clear_bounds=[[xmin, ymin, zmin], [xmax, ymax, zmax]],
-        purpose="evaluation only; do not train or tune on observed outcomes",
+        purpose="training"
+        if purpose == "training"
+        else "evaluation only; do not train or tune on observed outcomes",
         baseline="always action 4 (run_jump); identical rule on every course",
         limitation="conservative geometry limits do not prove solvability",
     )
