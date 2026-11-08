@@ -108,7 +108,7 @@ def run_server(options: ServerOptions) -> int:
         start_new_session=True,
     )
     input_stream, output_stream = process.stdin, process.stdout
-    assert input_stream is not None and output_stream is not None  # Both use subprocess.PIPE.
+    assert input_stream is not None and output_stream is not None  # both use subprocess.pipe.
 
     def send(command: str) -> None:
         input_stream.write(command + "\n")
@@ -121,13 +121,18 @@ def run_server(options: ServerOptions) -> int:
             print(line, end="", flush=True)
             if not ready and "Done (" in line:
                 ready = True
-                send(f"op {options.bot_name}")
                 print(
                     f"Connect Minecraft Java to 127.0.0.1:{options.port} to watch."
                     if watcher
                     else "Headless server ready; start the learner in another terminal.",
                     flush=True,
                 )
+            # wait for the real login so offline names resolve to the correct profile
+            joined = re.search(
+                r"\[Server thread/INFO\]: ([A-Za-z0-9_]{1,16}) joined the game$", line.strip()
+            )
+            if joined and joined.group(1) == options.bot_name:
+                send(f"op {options.bot_name}")
             if watcher:
                 for instruction in watcher.on_log(line):
                     send(instruction)

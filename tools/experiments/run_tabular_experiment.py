@@ -116,7 +116,7 @@ def main():
             current = subprocess.Popen(
                 command, stdout=handle, stderr=subprocess.STDOUT, start_new_session=True
             )
-            # A finite bound includes every decision, reset overhead and a lag margin.
+            # a finite bound includes every decision, reset overhead and a lag margin.
             current.wait(timeout=max(60, episodes * (Profile.load(course).max_steps * 0.1 + 1) * 2))
         if current.returncode:
             raise RuntimeError(f"{mode} failed; inspect {output}")

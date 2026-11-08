@@ -29,7 +29,7 @@ class MineflayerBackend:
             bufsize=1,
         )
         input_stream, output_stream = self.process.stdin, self.process.stdout
-        assert input_stream is not None and output_stream is not None  # Both use subprocess.PIPE.
+        assert input_stream is not None and output_stream is not None  # both use subprocess.pipe.
         self.input_stream, self.output_stream = input_stream, output_stream
         self.responses = queue.Queue()
         self.request_id = 0
