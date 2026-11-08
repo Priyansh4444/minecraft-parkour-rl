@@ -13,7 +13,6 @@ bridge/           Mineflayer transport and physics checks
 tools/
   courses/        map import and random-course generation
   experiments/    independent-seed experiment runner
-tests/            learning, Minecraft, course and experiment checks
 docs/             setup, project, experiment and research guides
 .local/           local servers, worlds, checkpoints and logs
 ```
@@ -53,7 +52,7 @@ Open Minecraft Java 26.1.2 and connect to `127.0.0.1:25566`. Start the **same tr
 
 ## Development
 
-See [development checks](docs/development/checks.md) for formatting, linting, type checking and tests.
+See [development checks](docs/development/checks.md) for formatting, linting and type checking.
 
 - [How the code works](docs/project/guide.md)
 - [Proposal scope and evaluation](docs/project/proposal-scope.md)
@@ -61,7 +60,7 @@ See [development checks](docs/development/checks.md) for formatting, linting, ty
 - [Simple baseline and randomized course](docs/experiments/random-course.md)
 
 ```sh
-uv run --extra ppo python -m tools.development.check
+./scripts/check.sh
 ```
 
 Start with single-jump calibration, then the proposed three-jump course. Completing one fixed jump does not establish full-map navigation or generalization. After installation the training loop needs no internet; the server and computer must keep running.

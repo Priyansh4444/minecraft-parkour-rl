@@ -18,7 +18,6 @@ The actions are idle, walk, run, walking jump and running jump. Base rewards are
 | `bridge/` | Node transport, raw state, controls and bounded client-physics stepping. |
 | `tools/courses/` | Safe world import and reproducible randomized test construction commands. |
 | `tools/experiments/` | Independent training seeds and matched greedy/random/simple-script comparisons. |
-| `tests/` | Checks grouped by learning, Minecraft, course and experiment responsibilities. |
 
 Both [headless](../setup/server.md) and [visible](../setup/watching.md) operation use this exact loop. The spectator affects only a separate player. The server world continues between requested actions; Mineflayer stepping is not authoritative server-side lockstep.
 

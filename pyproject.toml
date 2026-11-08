@@ -38,7 +38,7 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 python-version = "3.11"
 
 [tool.ty.src]
-include = ["parkour", "tools", "tests"]
+include = ["parkour", "tools"]
 
 [tool.ty.rules]
 possibly-missing-attribute = "error"

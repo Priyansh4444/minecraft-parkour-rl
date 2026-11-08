@@ -1,49 +1,22 @@
-import type { Bot, ControlState } from "mineflayer";
-import type { Vec3 } from "vec3";
+import type { Bot } from "mineflayer";
 
 export interface Grid {
   radius: number;
   down: number;
   up: number;
 }
-export interface BlockSample {
-  name: string;
-  shapes: readonly (readonly number[])[];
-}
-export interface MovementEntity {
-  position: Vec3;
-  velocity: Vec3;
-  yaw: number;
-  onGround: boolean;
-  isCollidedHorizontally?: boolean;
-  isCollidedVertically?: boolean;
-  isInWater?: boolean;
-  isInLava?: boolean;
-  isInWeb?: boolean;
-}
-export interface ParkourBot
-  extends Pick<
-    Bot,
-    | "health"
-    | "food"
-    | "physicsEnabled"
-    | "setControlState"
-    | "clearControlStates"
-    | "look"
-    | "chat"
-  > {
-  on(event: "forcedMove" | "physicsTick", listener: () => void): unknown;
-  once(event: "end", listener: (reason: string) => void): unknown;
-  once(event: "error", listener: (error: Error) => void): unknown;
-  removeListener(event: "physicsTick", listener: () => void): unknown;
-  removeListener(event: "end", listener: (reason: string) => void): unknown;
-  removeListener(event: "error", listener: (error: Error) => void): unknown;
-  entity: MovementEntity;
-  controlState: Partial<Record<ControlState, boolean>>;
+/** Mineflayer adds these physics fields at runtime. */
+export type ParkourBot = Bot & {
+  entity: Bot["entity"] & {
+    isCollidedHorizontally?: boolean;
+    isCollidedVertically?: boolean;
+    isInWater?: boolean;
+    isInLava?: boolean;
+    isInWeb?: boolean;
+  };
   jumpTicks?: number;
   jumpQueued?: boolean;
-  blockAt(position: Vec3, extraInfo?: boolean): BlockSample | null;
-}
+};
 export interface ResetRequest {
   start: [number, number, number];
   yaw: number;
