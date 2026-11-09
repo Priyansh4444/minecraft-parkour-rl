@@ -6,9 +6,11 @@ Start the local Minecraft server first. This script never builds/changes a map.
 import argparse
 import hashlib
 import json
+import os
 import signal
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 
@@ -26,6 +28,7 @@ def main():
     parser.add_argument("--held-out", nargs="*", type=Path, default=[])
     parser.add_argument("--port", type=int, default=25566)
     parser.add_argument("--shaped", action="store_true")
+    parser.add_argument("--track-contacts", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
     if len(set(args.seeds)) != len(args.seeds) or len(args.seeds) < 3 or min(args.seeds) < 0:
         parser.error("use at least three distinct nonnegative training seeds")
@@ -54,6 +57,7 @@ def main():
     manifest = {
         "algorithm": "tabular-q",
         "reward_mode": "platform-bonus" if args.shaped else "sparse",
+        "track_contacts": args.track_contacts,
         "seeds": args.seeds,
         "training_episodes_per_seed": args.train_episodes,
         "evaluation_episodes_per_controller_seed_course": args.eval_episodes,
@@ -66,9 +70,11 @@ def main():
             str(p): digest(p)
             for p in [
                 Path("parkour/learning/q_learning.py"),
+                Path("parkour/learning/contacts.py"),
                 Path("parkour/minecraft/connection.py"),
-                Path("bridge/headless.mjs"),
-                Path("bridge/parkour-state.mjs"),
+                Path("bridge/headless.ts"),
+                Path("bridge/parkour-state.ts"),
+                Path("bridge/protocol.ts"),
                 Path("bridge/package-lock.json"),
                 Path("tools/courses/prepare_random_course.py"),
                 Path("tools/experiments/run_tabular_experiment.py"),
@@ -108,6 +114,7 @@ def main():
             command.append("--" + mode)
         if args.shaped:
             command.append("--shaped")
+        command.append("--track-contacts" if args.track_contacts else "--no-track-contacts")
         status("running", seed=seed, controller=mode, course=str(course), command=command)
         output = args.output / f"seed-{seed}" / f"{course.stem}-{mode}.log"
         checkpoint = prefix.with_suffix(".json")
@@ -147,11 +154,13 @@ def main():
         raise
     finally:
         if current is not None and current.poll() is None:
-            current.send_signal(signal.SIGINT)
+            with suppress(ProcessLookupError):
+                os.killpg(current.pid, signal.SIGINT)
             try:
                 current.wait(timeout=15)
             except subprocess.TimeoutExpired:
-                current.kill()
+                with suppress(ProcessLookupError):
+                    os.killpg(current.pid, signal.SIGKILL)
                 current.wait()
 
 

@@ -4,12 +4,18 @@ import argparse
 import hashlib
 import json
 import shutil
+from contextlib import closing
 from pathlib import Path
 
 import torch
 from stable_baselines3 import PPO
 
-from parkour.learning.ppo.checkpoints import PPO_OPTIONS, SaveEveryRollout, save_checkpoint
+from parkour.learning.ppo.checkpoints import (
+    PPO_OPTIONS,
+    SaveEveryRollout,
+    save_checkpoint,
+    validate_warm_start,
+)
 from parkour.learning.ppo.routes import RouteTrainingEnv
 from parkour.learning.q_learning import SCHEMA, Profile
 from parkour.minecraft.connection import MineflayerBackend
@@ -49,15 +55,20 @@ def main() -> None:
             or configuration["schema"] != SCHEMA
             or configuration["seed"] != arguments.seed
             or configuration["ppo"] != PPO_OPTIONS
+            or configuration.get("platform_detection", "final-tick") != "final-tick"
+            or configuration.get("reward_mode") != "sparse"
+            or configuration.get("ticks") != 2
         ):
             raise ValueError("This checkpoint belongs to a different training condition")
         model_file = prefix.with_suffix(".zip")
     else:
+        initial_model = validate_warm_start(arguments.warm_start) if arguments.warm_start else None
         output.mkdir(parents=True, exist_ok=False)
         configuration = dict(
             algorithm="ppo",
             schema=SCHEMA,
             reward_mode="sparse",
+            platform_detection="final-tick",
             ticks=2,
             seed=arguments.seed,
             ppo=PPO_OPTIONS,
@@ -66,28 +77,19 @@ def main() -> None:
             requested_steps=arguments.steps,
         )
         model_file = None
-        if arguments.warm_start:
-            source = arguments.warm_start
-            condition = json.loads(source.with_suffix(".json").read_text())
-            if (
-                condition.get("tabular_schema") != SCHEMA
-                or condition.get("reward_mode") != "sparse"
-                or condition.get("ticks") != 2
-                or condition.get("ppo") != PPO_OPTIONS
-            ):
-                raise ValueError(
-                    "Warm-start model has a different observation/action/reward condition"
-                )
+        if initial_model:
             model_file = output / "initial-model.zip"
-            shutil.copyfile(source.with_suffix(".zip"), model_file)
+            shutil.copyfile(initial_model, model_file)
             configuration["warm_start_sha256"] = hashlib.sha256(model_file.read_bytes()).hexdigest()
 
     torch.set_num_threads(1)
     environment = None
     model = None
-    with prefix.with_suffix(".jsonl").open("a") as log_file:
+    with (
+        prefix.with_suffix(".jsonl").open("a") as log_file,
+        closing(MineflayerBackend("127.0.0.1", arguments.port, "Watcher", "26.1.2")) as backend,
+    ):
         try:
-            backend = MineflayerBackend("127.0.0.1", arguments.port, "Watcher", "26.1.2")
             environment = RouteTrainingEnv(
                 training_routes, backend, log_file, output, arguments.seed, arguments.watch_player
             )

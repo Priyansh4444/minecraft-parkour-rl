@@ -12,10 +12,10 @@ from pathlib import Path
 def simple_script(profile):
     """Hold forward, sprint and jump throughout; no geometry or timing lookup."""
     result = copy.deepcopy(profile)
-    if "max_decisions" in result:
-        result["scripted_actions"] = ["run_jump"] * result["max_decisions"]
+    if "start_position" in result:
+        result["scripted_actions"] = ["run_jump"] * result.get("max_decisions", 80)
     else:
-        result["script"] = [4] * result["max_steps"]
+        result["script"] = [4] * result.get("max_steps", 80)
     return result
 
 
