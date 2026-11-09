@@ -3,23 +3,89 @@
 from __future__ import annotations
 
 import json
+import math
 import queue
 import shutil
 import subprocess
 import threading
+from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
+from typing import NotRequired, TypedDict, cast
+
+
+class PhysicsFrame(TypedDict):
+    """One measured bot state received from the TypeScript bridge."""
+
+    position: list[float]
+    velocity: list[float]
+    on_ground: bool
+    health: float
+    tick: int
+    start_tick: int
+    elapsed_ticks: int
+    correction_count: int
+    jump_ticks: NotRequired[int]
+    tick_frames: NotRequired[list[PhysicsFrame]]
+
+
+def number(value: object) -> bool:
+    return isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def point(value: object) -> bool:
+    return isinstance(value, list) and len(value) == 3 and all(number(v) for v in value)
+
+
+def validate_frame(frame: object) -> PhysicsFrame:
+    if (
+        not isinstance(frame, dict)
+        or not point(frame.get("position"))
+        or not point(frame.get("velocity"))
+    ):
+        raise ValueError("Missing or invalid player position/velocity")
+    if not isinstance(frame.get("on_ground"), bool) or not number(frame.get("health")):
+        raise ValueError("Invalid ground/health observation")
+    for name in ("tick", "start_tick", "elapsed_ticks", "correction_count"):
+        if type(frame.get(name)) is not int or frame[name] < 0:
+            raise ValueError(f"Invalid {name}")
+    if frame["tick"] - frame["start_tick"] != frame["elapsed_ticks"]:
+        raise ValueError("Inconsistent client tick counters")
+    return cast(PhysicsFrame, frame)
+
+
+class BridgeError(RuntimeError):
+    """The bot connection could not complete a request."""
+
+
+@dataclass(frozen=True)
+class BridgeReply:
+    request_id: int
+    result: object
+
+
+def parse_reply(line: str) -> BridgeReply:
+    reply = json.loads(line)
+    if not isinstance(reply, dict) or ("result" in reply) == ("error" in reply):
+        raise BridgeError("The bot reply needs exactly one result or error")
+    if "error" in reply:
+        if not isinstance(reply["error"], str):
+            raise BridgeError("The bot error must be text")
+        raise BridgeError(reply["error"])
+    if type(reply.get("id")) is not int:
+        raise BridgeError("The bot reply is missing an integer request ID")
+    return BridgeReply(reply["id"], reply["result"])
 
 
 class MineflayerBackend:
     """Read state and control a local Mineflayer bot over JSON RPC."""
 
-    def __init__(self, host: str, port: int, username: str, version: str):
+    def __init__(self, host: str, port: int, username: str, version: str) -> None:
         if host not in ("127.0.0.1", "localhost", "::1"):
             raise ValueError("This adapter only connects to a local Minecraft server")
         node = shutil.which("node")
         if node is None:
-            raise RuntimeError("Install Node.js 22.18 or newer, then run npm ci in bridge/")
+            raise FileNotFoundError("Install Node.js 22.18 or newer, then run npm ci in bridge/")
         bridge = Path(__file__).resolve().parents[2] / "bridge" / "headless.ts"
         self.process = subprocess.Popen(
             [node, str(bridge)],
@@ -31,10 +97,11 @@ class MineflayerBackend:
         input_stream, output_stream = self.process.stdin, self.process.stdout
         assert input_stream is not None and output_stream is not None  # both use subprocess.pipe.
         self.input_stream, self.output_stream = input_stream, output_stream
-        self.responses = queue.Queue()
+        self.responses: queue.Queue[str | OSError | None] = queue.Queue()
         self.request_id = 0
         self.closed = False
-        threading.Thread(target=self._read_responses, daemon=True).start()
+        self.reader = threading.Thread(target=self._read_responses, daemon=True)
+        self.reader.start()
         try:
             self._request("connect", host=host, port=port, username=username, version=version)
         except BaseException:
@@ -44,91 +111,60 @@ class MineflayerBackend:
     def _read_responses(self) -> None:
         try:
             for line in self.output_stream:
-                try:
-                    self.responses.put(json.loads(line))
-                except ValueError:
-                    self.responses.put(RuntimeError(f"Invalid bridge response: {line.rstrip()}"))
+                self.responses.put(line)
+        except OSError as error:
+            self.responses.put(error)
         finally:
-            self.responses.put(RuntimeError("Mineflayer bridge exited; inspect its error output"))
+            self.responses.put(None)
 
-    def _request(self, operation: str, **fields):
+    def _request(self, operation: str, **fields: object) -> object:
         if self.closed or self.process.poll() is not None:
-            raise RuntimeError("Mineflayer bridge is not running")
+            self.close()
+            raise BridgeError(f"{operation}: the bot connection is closed")
         self.request_id += 1
         request = {"id": self.request_id, "op": operation, **fields}
         try:
             self.input_stream.write(json.dumps(request) + "\n")
             self.input_stream.flush()
-        except (BrokenPipeError, OSError) as error:
-            raise RuntimeError("Lost connection to the Mineflayer bridge") from error
-        try:
-            response = self.responses.get(timeout=20)
-        except queue.Empty as error:
-            raise RuntimeError(f"Mineflayer operation timed out: {operation}") from error
-        if isinstance(response, Exception):
-            raise response
-        if response.get("id") != self.request_id:
-            raise RuntimeError("Mineflayer responses arrived out of order")
-        if "error" in response:
-            raise RuntimeError(response["error"])
-        return response["result"]
+            line = self.responses.get(timeout=20)
+            if isinstance(line, OSError):
+                raise line
+            if line is None:
+                raise BridgeError("The bot process exited; inspect its error output")
+            response = parse_reply(line)
+            if response.request_id != self.request_id:
+                raise BridgeError(
+                    f"Expected reply {self.request_id}, received {response.request_id}"
+                )
+            return response.result
+        except (BridgeError, OSError, json.JSONDecodeError, queue.Empty) as error:
+            self.close()
+            reason = (
+                "no bot reply after 20 seconds" if isinstance(error, queue.Empty) else str(error)
+            )
+            raise BridgeError(f"{operation}: {reason}") from error
 
-    def player(self):
-        state = self._request("snapshot")
-        return SimpleNamespace(**state)
+    def reset(self, start: tuple[float, float, float], yaw: float) -> PhysicsFrame:
+        return validate_frame(self._request("parkour_reset", start=list(start), yaw=yaw))
 
-    def player_position(self):
-        return self.player().position
+    def step(self, buttons: tuple[int, int, int, int, int], ticks: int) -> PhysicsFrame:
+        return validate_frame(self._request("parkour_step", action=list(buttons), ticks=ticks))
 
-    def player_health(self):
-        return self.player().health
-
-    def world_info(self):
-        return SimpleNamespace(game_ticks=self.player().tick)
-
-    def get_block_list(self, positions):
-        return self._request("blocks", positions=positions)
-
-    def getblock(self, x, y, z):
-        return self.get_block_list([[x, y, z]])[0]
-
-    def player_press_forward(self, pressed):
-        self._request("controls", keys={"forward": pressed})
-
-    def player_press_sprint(self, pressed):
-        self._request("controls", keys={"sprint": pressed})
-
-    def player_press_jump(self, pressed):
-        self._request("controls", keys={"jump": pressed})
-
-    def player_set_orientation(self, yaw, pitch):
-        self._request("look", yaw=yaw, pitch=pitch)
-
-    def execute(self, command):
+    def execute(self, command: str) -> None:
         self._request("command", command=command)
 
-    @staticmethod
-    def echo(message):
-        print(message, flush=True)
-
-    def close(self):
+    def close(self) -> None:
         if self.closed:
             return
-        try:
-            if self.process.poll() is None:
-                self._request("close")
-        except Exception:
-            pass
-        finally:
-            self.closed = True
-            if self.process.stdin:
-                self.process.stdin.close()
-            try:
-                self.process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait()
+        self.closed = True
+
+        # closing stdin lets the bridge disconnect the bot, even after a failed request
+        with suppress(OSError):
+            self.input_stream.close()
+        with suppress(subprocess.TimeoutExpired):
+            self.process.wait(timeout=3)
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.wait()
+        self.reader.join()
+        self.output_stream.close()

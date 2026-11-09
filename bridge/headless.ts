@@ -1,6 +1,6 @@
 // A JSON-lines transport. Python owns observations and learning.
 import readline from "node:readline";
-import mineflayer, { type Bot, type ControlState } from "mineflayer";
+import mineflayer, { type Bot } from "mineflayer";
 import { Vec3 } from "vec3";
 import { SteppedParkour } from "./parkour-state.ts";
 import { type BridgeRequest, type ConnectRequest, parseRequest } from "./protocol.ts";
@@ -63,17 +63,6 @@ async function connect(options: ConnectRequest) {
   return { username: bot.username, tick };
 }
 
-function snapshot() {
-  const entity = bot.entity;
-  return {
-    position: entity.position.toArray(),
-    velocity: entity.velocity.toArray(),
-    yaw: ((180 - (entity.yaw * 180) / Math.PI + 540) % 360) - 180,
-    health: bot.health,
-    tick,
-  };
-}
-
 async function handle(request: BridgeRequest) {
   if (request.op === "connect") return connect(request);
   if (request.op === "close") {
@@ -91,44 +80,19 @@ async function handle(request: BridgeRequest) {
     case "parkour_step":
       return parkour.step(request);
     case "parkour_observe":
-      return parkour.observe(request.grid);
-    case "snapshot":
-      return snapshot();
+      return parkour.observe();
     case "blocks":
       return request.positions.map((position) => {
-        if (!Array.isArray(position) || position.length !== 3 || !position.every(Number.isFinite)) {
-          throw new Error("Block position must contain three finite coordinates");
-        }
         const block = bot.blockAt(new Vec3(...position));
         if (!block) throw new Error(`Chunk is not loaded at ${position.join(",")}`);
         return `minecraft:${block.name}`;
       });
-    case "controls":
-      for (const [name, pressed] of Object.entries(request.keys)) {
-        if (
-          !["forward", "back", "left", "right", "sprint", "jump"].includes(name) ||
-          typeof pressed !== "boolean"
-        ) {
-          throw new Error("Unknown control or non-boolean control value");
-        }
-        bot.setControlState(name as ControlState, pressed);
-      }
-      return true;
-    case "look":
-      await bot.look(
-        Math.PI - (request.yaw * Math.PI) / 180,
-        (-request.pitch * Math.PI) / 180,
-        true,
-      );
-      return true;
     case "command":
-      if (typeof request.command !== "string" || /[\r\n]/.test(request.command)) {
+      if (/[\r\n]/.test(request.command)) {
         throw new Error("Expected one Minecraft command");
       }
       bot.chat(`/${request.command}`);
       return true;
-    default:
-      throw new Error(`Unknown operation: ${request.op}`);
   }
 }
 

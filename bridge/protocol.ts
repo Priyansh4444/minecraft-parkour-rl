@@ -1,31 +1,38 @@
 import type { Bot } from "mineflayer";
 
-export interface Grid {
-  radius: number;
-  down: number;
-  up: number;
+// mineflayer adds the jump cooldown at runtime
+export type ParkourBot = Bot & { jumpTicks?: number };
+
+export type Position = [x: number, y: number, z: number];
+
+// keep the recorded button order used by both learners and saved experiments
+export type Action = [
+  longitudinal: 0 | 1 | 2,
+  strafe: 0 | 1 | 2,
+  jump: 0 | 1,
+  sprint: 0 | 1,
+  turn: 0 | 1 | 2,
+];
+
+export interface PhysicsFrame {
+  position: Position;
+  velocity: Position;
+  health: number;
+  tick: number;
+  start_tick: number;
+  elapsed_ticks: number;
+  on_ground: boolean;
+  jump_ticks: number;
+  correction_count: number;
 }
-/** Mineflayer adds these physics fields at runtime. */
-export type ParkourBot = Bot & {
-  entity: Bot["entity"] & {
-    isCollidedHorizontally?: boolean;
-    isCollidedVertically?: boolean;
-    isInWater?: boolean;
-    isInLava?: boolean;
-    isInWeb?: boolean;
-  };
-  jumpTicks?: number;
-  jumpQueued?: boolean;
-};
+
 export interface ResetRequest {
-  start: [number, number, number];
+  start: Position;
   yaw: number;
-  grid?: Grid;
 }
 export interface StepRequest {
-  action: unknown;
+  action: Action;
   ticks: number;
-  grid?: Grid;
 }
 export interface ConnectRequest {
   host: string;
@@ -37,11 +44,9 @@ export type BridgeRequest = { id: number } & (
   | ({ op: "connect" } & ConnectRequest)
   | ({ op: "parkour_reset" } & ResetRequest)
   | ({ op: "parkour_step" } & StepRequest)
-  | { op: "parkour_observe"; grid?: Grid }
-  | { op: "close" | "snapshot" }
-  | { op: "blocks"; positions: [number, number, number][] }
-  | { op: "controls"; keys: Record<string, boolean> }
-  | { op: "look"; yaw: number; pitch: number }
+  | { op: "parkour_observe" }
+  | { op: "close" }
+  | { op: "blocks"; positions: Position[] }
   | { op: "command"; command: string }
 );
 
@@ -59,17 +64,27 @@ function text(value: unknown): string {
   if (typeof value !== "string") throw new Error("Expected text");
   return value;
 }
-function position(value: unknown): [number, number, number] {
+function position(value: unknown): Position {
   if (!Array.isArray(value) || value.length !== 3) throw new Error("Expected three coordinates");
   return [number(value[0]), number(value[1]), number(value[2])];
 }
-function grid(value: unknown): Grid | undefined {
-  if (value === undefined) return undefined;
-  const fields = object(value);
-  return { radius: number(fields.radius), down: number(fields.down), up: number(fields.up) };
+function action(value: unknown): Action {
+  const limits = [3, 3, 2, 2, 3];
+  if (
+    !Array.isArray(value) ||
+    value.length !== limits.length ||
+    value.some(
+      (button, index) => !Number.isInteger(button) || button < 0 || button >= limits[index],
+    )
+  ) {
+    throw new Error(
+      "Action requires [longitudinal 0..2, strafe 0..2, jump 0..1, sprint 0..1, turn 0..2]",
+    );
+  }
+  return value as Action;
 }
 
-/** Validate JSON at the process boundary; movement checks its own action limits. */
+// validate external json once; movement receives concrete types
 export function parseRequest(line: string): BridgeRequest {
   const request = object(JSON.parse(line));
   const id = number(request.id);
@@ -89,35 +104,26 @@ export function parseRequest(line: string): BridgeRequest {
         op: "parkour_reset",
         start: position(request.start),
         yaw: number(request.yaw),
-        grid: grid(request.grid),
       };
-    case "parkour_step":
+    case "parkour_step": {
+      const ticks = number(request.ticks);
+      if (!Number.isInteger(ticks) || ticks < 1 || ticks > 20)
+        throw new Error("Step ticks must be an integer 1..20");
       return {
         id,
         op: "parkour_step",
-        action: request.action,
-        ticks: number(request.ticks),
-        grid: grid(request.grid),
+        action: action(request.action),
+        ticks,
       };
+    }
     case "parkour_observe":
-      return { id, op: "parkour_observe", grid: grid(request.grid) };
+      return { id, op: "parkour_observe" };
     case "close":
-    case "snapshot":
       return { id, op: request.op };
     case "blocks": {
       if (!Array.isArray(request.positions)) throw new Error("Expected block positions");
       return { id, op: "blocks", positions: request.positions.map(position) };
     }
-    case "controls": {
-      const keys: Record<string, boolean> = {};
-      for (const [name, pressed] of Object.entries(object(request.keys))) {
-        if (typeof pressed !== "boolean") throw new Error("Controls must be boolean");
-        keys[name] = pressed;
-      }
-      return { id, op: "controls", keys };
-    }
-    case "look":
-      return { id, op: "look", yaw: number(request.yaw), pitch: number(request.pitch) };
     case "command":
       return { id, op: "command", command: text(request.command) };
     default:
