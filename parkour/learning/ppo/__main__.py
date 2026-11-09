@@ -6,7 +6,6 @@ from pathlib import Path
 
 import torch
 from stable_baselines3 import PPO
-from stable_baselines3.common.env_checker import check_env
 
 from ...minecraft.connection import MineflayerBackend
 from ..q_learning import Profile
@@ -31,7 +30,7 @@ def evaluate(
             action, _ = model.predict(observation, deterministic=True)
             observation, _, terminated, truncated, info = environment.step(int(action))
             if terminated or truncated:
-                counts[info["outcome"]] += 1
+                counts[str(info["outcome"])] += 1
                 break
     return counts
 
@@ -47,7 +46,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--shaped", action="store_true")
-    parser.add_argument("--check-env", action="store_true")
+    parser.add_argument(
+        "--observations",
+        choices=("binned", "context"),
+        default="binned",
+        help="use the original seven bins or fifteen numerical context values",
+    )
+    parser.add_argument(
+        "--track-contacts",
+        action="store_true",
+        help="detect platform contacts at every physics tick",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=25567)
     parser.add_argument("--username", default="Watcher")
@@ -73,6 +82,8 @@ def main(argv: list[str] | None = None) -> None:
         ticks=arguments.ticks,
         shaped=arguments.shaped,
         seed=arguments.seed,
+        contextual=arguments.observations == "context",
+        track_contacts=arguments.track_contacts,
     )
     files = CheckpointFiles.from_prefix(arguments.output)
     training_configuration = configuration
@@ -89,7 +100,7 @@ def main(argv: list[str] | None = None) -> None:
             arguments.output.parent.mkdir(parents=True, exist_ok=True)
             log_file = files.training_log.open("a")
 
-        def log(**fields):
+        def log(**fields: object) -> None:
             line = json.dumps(
                 dict(mode="eval" if arguments.eval else "train", seed=arguments.seed, **fields),
                 allow_nan=False,
@@ -113,6 +124,8 @@ def main(argv: list[str] | None = None) -> None:
             profile,
             ticks=arguments.ticks,
             shaped=arguments.shaped,
+            contextual=arguments.observations == "context",
+            track_contacts=arguments.track_contacts,
             log=log,
             backend_factory=lambda: MineflayerBackend(
                 arguments.host, arguments.port, arguments.username, arguments.version
@@ -123,8 +136,6 @@ def main(argv: list[str] | None = None) -> None:
             if arguments.eval or arguments.resume
             else PPO("MlpPolicy", environment, seed=arguments.seed, **PPO_OPTIONS)
         )
-        if arguments.check_env:
-            check_env(environment, warn=True)
         if arguments.eval:
             counts = evaluate(model, environment, arguments.episodes, arguments.seed)
             log(event="done", episodes=arguments.episodes, **counts)

@@ -3,27 +3,29 @@
 import math
 import time
 from collections.abc import Callable
-from typing import Any
 
 import gymnasium as gym
 import numpy as np
 from numpy.typing import NDArray
 
 from ...minecraft.connection import MineflayerBackend
+from ..contacts import action_frames, detect_contacts
 from ..q_learning import (
     ACTIONS,
     BINS,
     BUTTONS,
-    GRID,
+    EpisodeSummary,
     Profile,
     landed_platform,
     reward_for,
     state_key,
-    validate_frame,
 )
+from .observations import CONTEXT_FIELDS, context_observation
 
 Observation = NDArray[np.float32]
-EpisodeInfo = dict[str, Any]
+
+EpisodeInfo = dict[str, object]
+
 
 LOW = np.array([math.floor(low / width) for width, low, high in BINS.values()] + [0, 0])
 HIGH = np.array([math.floor(high / width) for width, low, high in BINS.values()] + [1, 5])
@@ -44,7 +46,7 @@ def encode(state: tuple[int, ...]) -> Observation:
 
 
 class CompactParkourEnv(gym.Env):
-    """Gymnasium environment with the same states, actions and rewards as Q-learning."""
+    """Minecraft episode loop, using the original seven-bin observations by default."""
 
     def __init__(
         self,
@@ -54,6 +56,8 @@ class CompactParkourEnv(gym.Env):
         backend_factory: Callable[[], MineflayerBackend] | None = None,
         ticks: int = 2,
         shaped: bool = False,
+        contextual: bool = False,
+        track_contacts: bool = False,
         log: Callable[..., None] | None = None,
     ) -> None:
         self.backend = backend
@@ -63,17 +67,24 @@ class CompactParkourEnv(gym.Env):
             if type(ticks) is not int or not 1 <= ticks <= 20:
                 raise ValueError("ticks must be an integer in 1..20")
             self.profile, self.ticks, self.shaped = profile, ticks, shaped
+            self.contextual, self.track_contacts = contextual, track_contacts
             self.backend_factory = backend_factory
             self.log = log or (lambda **fields: None)
-            self.observation_space = gym.spaces.Box(-1, 1, (7,), dtype=np.float32)
+            fields = len(CONTEXT_FIELDS) if contextual else 7
+            self.observation_space = gym.spaces.Box(-1, 1, (fields,), dtype=np.float32)
             self.action_space = gym.spaces.Discrete(len(BUTTONS))
             self.episode, self.active = 0, False
         except BaseException:
             self.close()
             raise
 
+    def observation(self) -> Observation:
+        if self.contextual:
+            return context_observation(self.profile, self.frame, self.highest, self.steps)
+        return encode(state_key(self.profile, self.frame, self.highest))
+
     def reset(
-        self, *, seed: int | None = None, options: EpisodeInfo | None = None
+        self, *, seed: int | None = None, options: dict[str, object] | None = None
     ) -> tuple[Observation, EpisodeInfo]:
         super().reset(seed=seed)
         try:
@@ -82,11 +93,7 @@ class CompactParkourEnv(gym.Env):
                     raise ValueError("A backend or backend_factory is required")
                 self.backend = self.backend_factory()
             course = self.profile
-            frame = validate_frame(
-                self.backend._request(
-                    "parkour_reset", start=list(course.start), yaw=course.yaw, grid=GRID
-                )
-            )
+            frame = self.backend.reset(course.start, course.yaw)
             if (
                 landed_platform(course, frame) != 0
                 or math.dist(frame["position"], course.start) > 0.15
@@ -97,8 +104,7 @@ class CompactParkourEnv(gym.Env):
             self.total, self.client_ticks, self.started = 0.0, 0, time.monotonic()
             self.episode += 1
             self.active = True
-            self.state = state_key(course, frame, 0)
-            return encode(self.state), {"state": self.state, "highest_platform": 0, "progress": 0.0}
+            return self.observation(), {"highest_platform": 0, "progress": 0.0}
         except BaseException:
             self.close()
             raise
@@ -110,74 +116,65 @@ class CompactParkourEnv(gym.Env):
         if backend is None:
             raise RuntimeError("Reset before stepping to establish the Minecraft connection")
         try:
+            before_observation = self.observation()
             course, action = self.profile, int(action)
-            after = validate_frame(
-                backend._request(
-                    "parkour_step", action=list(BUTTONS[action]), ticks=self.ticks, grid=GRID
-                )
-            )
+            after = backend.step(BUTTONS[action], self.ticks)
             if after["elapsed_ticks"] != self.ticks or after["correction_count"] != self.correction:
                 raise RuntimeError(
                     "Unexpected action duration or server correction; transition discarded"
                 )
-            landed, previous = landed_platform(course, after), self.highest
-            self.highest = max(previous, landed if landed is not None else 0)
-            self.steps += 1
-            outcome = (
-                "fall"
-                if after["health"] <= 0 or after["position"][1] < course.fall_y
-                else "goal"
-                if landed == len(course.platforms) - 1
-                else "timeout"
-                if self.steps == course.max_steps
-                else "running"
+            previous = self.highest
+            frames = action_frames(
+                after, self.ticks, self.correction, track_contacts=self.track_contacts
             )
+            contacts = detect_contacts(course.platforms, course.fall_y, frames, self.highest)
+            self.highest, landed, outcome = (
+                contacts.highest_platform,
+                contacts.landed_platform,
+                contacts.outcome,
+            )
+            self.steps += 1
+            if outcome == "running" and self.steps == course.max_steps:
+                outcome = "timeout"
             terminated, truncated = outcome in ("goal", "fall"), outcome == "timeout"
             reward = reward_for(outcome, landed, previous, len(course.platforms) - 1, self.shaped)
-            next_state = state_key(course, after, self.highest)
+            self.frame = after
+            next_observation = self.observation()
             self.total += reward
             self.client_ticks += after["elapsed_ticks"]
-            info = dict(
-                state=next_state,
+            progress = self.highest / (len(course.platforms) - 1)
+            info: EpisodeInfo = dict(
                 outcome=outcome,
                 highest_platform=self.highest,
-                progress=self.highest / (len(course.platforms) - 1),
+                progress=progress,
             )
             self.log(
                 event="transition",
                 episode=self.episode,
                 step=self.steps - 1,
-                state=list(self.state),
                 action=ACTIONS[action],
-                next_state=list(next_state),
-                before={k: self.frame[k] for k in ("position", "velocity", "on_ground")},
-                after={k: after[k] for k in ("position", "velocity", "on_ground")},
+                observation=before_observation.tolist(),
+                next_observation=next_observation.tolist(),
                 reward=reward,
                 terminated=terminated,
-                terminal=terminated,
                 truncated=truncated,
-                episode_end=terminated or truncated,
                 outcome=outcome,
-                highest_platform=self.highest,
-                progress=info["progress"],
-                elapsed_ticks=after["elapsed_ticks"],
             )
             if terminated or truncated:
                 self.active = False
-                summary = dict(
-                    outcome=outcome,
-                    success=outcome == "goal",
-                    **{"return": self.total},
-                    max_platform=self.highest,
-                    progress=info["progress"],
-                    steps=self.steps,
-                    seconds=time.monotonic() - self.started,
-                    client_ticks=self.client_ticks,
-                )
+                summary: EpisodeSummary = {
+                    "outcome": outcome,
+                    "success": outcome == "goal",
+                    "return": self.total,
+                    "max_platform": self.highest,
+                    "progress": progress,
+                    "steps": self.steps,
+                    "seconds": time.monotonic() - self.started,
+                    "client_ticks": self.client_ticks,
+                }
                 info["summary"] = summary
                 self.log(event="episode", episode=self.episode, **summary)
-            self.frame, self.state = after, next_state
-            return encode(next_state), reward, terminated, truncated, info
+            return next_observation, reward, terminated, truncated, info
         except BaseException:
             self.close()
             raise

@@ -6,7 +6,7 @@ import os
 import random
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TextIO
 
 from ...minecraft.connection import MineflayerBackend
 from ...minecraft.server import player_name
@@ -38,7 +38,7 @@ class RouteTrainingEnv(CompactParkourEnv):
         self.watch_player = player_name(watch_player) if watch_player else None
         super().__init__(self.courses[0], backend=backend, log=self.record)
 
-    def record(self, **fields: Any) -> None:
+    def record(self, **fields: object) -> None:
         route = (
             self.evaluation_name
             if self.evaluation_course
@@ -70,7 +70,7 @@ class RouteTrainingEnv(CompactParkourEnv):
         temporary.replace(self.output_folder / "status.json")
 
     def reset(
-        self, *, seed: int | None = None, options: EpisodeInfo | None = None
+        self, *, seed: int | None = None, options: dict[str, object] | None = None
     ) -> tuple[Observation, EpisodeInfo]:
         if self.evaluation_course is not None:
             self.profile = self.evaluation_course
@@ -125,12 +125,15 @@ class RouteTrainingEnv(CompactParkourEnv):
             self.training_steps += 1
         _, _, terminated, truncated, info = result
         if terminated or truncated:
+            summary = info["summary"]
+            if not isinstance(summary, dict):
+                raise RuntimeError("Completed episodes must include their results")
             self.status(
                 "evaluating" if self.evaluation_course else "training",
                 route=self.evaluation_name
                 if self.evaluation_course
                 else self.route_files[self.current_route].stem,
                 episode=self.episode,
-                **info["summary"],
+                **summary,
             )
         return result

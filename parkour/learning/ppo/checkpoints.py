@@ -12,6 +12,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 from ..q_learning import ACTIONS, GAMMA, SCHEMA, Profile
 from .environment import HIGH, LOW
+from .observations import CONTEXT_FIELDS
 
 
 class PPOOptions(TypedDict):
@@ -41,6 +42,7 @@ PPO_OPTIONS: PPOOptions = dict(
     policy_kwargs={"net_arch": [32, 32]},
     device="cpu",
 )
+BIN_NORMALIZATION = "2*(integer_bin-low)/(high-low)-1; float32; round to invert"
 
 
 @dataclass(frozen=True)
@@ -59,9 +61,16 @@ class CheckpointFiles:
 
 
 def build_metadata(
-    profile: Profile, course: Path, *, ticks: int = 2, shaped: bool = False, seed: int = 11
+    profile: Profile,
+    course: Path,
+    *,
+    ticks: int = 2,
+    shaped: bool = False,
+    seed: int = 11,
+    contextual: bool = False,
+    track_contacts: bool = False,
 ) -> dict[str, object]:
-    return dict(
+    configuration: dict[str, object] = dict(
         algorithm="ppo-clip",
         version=1,
         tabular_schema=SCHEMA,
@@ -69,7 +78,7 @@ def build_metadata(
         state_fields=SCHEMA["state_fields"],
         raw_low=LOW.tolist(),
         raw_high=HIGH.tolist(),
-        normalization="2*(integer_bin-low)/(high-low)-1; float32; round to invert",
+        normalization=BIN_NORMALIZATION,
         reward_mode="platform-bonus" if shaped else "sparse",
         ticks=ticks,
         seed=seed,
@@ -79,6 +88,18 @@ def build_metadata(
         torch_threads=1,
         packages={name: version(name) for name in ("gymnasium", "stable-baselines3", "torch")},
     )
+    # retain the original metadata for existing seven-bin checkpoints
+    if contextual:
+        configuration.update(
+            version=2,
+            state_fields=CONTEXT_FIELDS,
+            raw_low=[-1.0] * len(CONTEXT_FIELDS),
+            raw_high=[1.0] * len(CONTEXT_FIELDS),
+            normalization="context_observation in observations.py; float32 clipped to [-1, 1]",
+        )
+    if track_contacts:
+        configuration.update(version=2, platform_detection="center-qualified contact at each tick")
+    return configuration
 
 
 def validate_checkpoint(
@@ -98,9 +119,40 @@ def validate_checkpoint(
         or not model_file.is_file()
     ):
         raise ValueError(
-            "Checkpoint is not compatible with compact PPO, this course, seed or reward/tick condition"
+            "Checkpoint does not match the observations, contact tracking, course, seed or reward/tick settings"
         )
     return saved_configuration
+
+
+def validate_warm_start(output_prefix: Path) -> Path:
+    """Route training uses seven bins, sparse rewards and final-tick contacts."""
+    files = CheckpointFiles.from_prefix(output_prefix)
+    saved = json.loads(files.metadata_file.read_text())
+    expected = dict(
+        algorithm="ppo-clip",
+        version=1,
+        tabular_schema=SCHEMA,
+        actions=list(ACTIONS),
+        state_fields=SCHEMA["state_fields"],
+        raw_low=LOW.tolist(),
+        raw_high=HIGH.tolist(),
+        normalization=BIN_NORMALIZATION,
+        reward_mode="sparse",
+        ticks=2,
+        ppo=PPO_OPTIONS,
+        packages={name: version(name) for name in ("gymnasium", "stable-baselines3", "torch")},
+    )
+    if (
+        not isinstance(saved, dict)
+        or any(saved.get(key) != value for key, value in expected.items())
+        or "platform_detection" in saved
+    ):
+        raise ValueError(
+            "Warm-start requires seven binned inputs, final-tick contacts and matching sparse-reward/PPO settings"
+        )
+    if not files.model_file.is_file():
+        raise FileNotFoundError(files.model_file)
+    return files.model_file
 
 
 def save_checkpoint(
